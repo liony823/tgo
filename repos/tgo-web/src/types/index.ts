@@ -955,7 +955,7 @@ export interface Message {
   metadata?: {
     sender_avatar?: string;
     is_read?: boolean;
-    has_stream_data?: boolean; // Flag to indicate if content comes from stream_data field
+    has_stream_data?: boolean; // Flag to indicate if content comes from stream/event_meta data
     is_streaming?: boolean; // Flag to indicate the message is still receiving stream data
     stream_started?: boolean; // Indicates whether the first stream chunk has been applied
     last_stream_update?: number; // Timestamp for the latest stream content update
@@ -1346,7 +1346,7 @@ export interface StreamEventMeta {
   event_version: number;
   last_msg_event_seq: number;
   event_count: number;
-  open_event_count: number;
+  open_event_count?: number;
   events: Array<{
     event_key: string;
     status: string;           // "open" | "closed" | "error" | "cancelled"
@@ -1370,7 +1370,6 @@ export interface WuKongIMMessage {
   payload: WuKongIMMessagePayload | string; // Message payload (new object format or legacy string format)
   end?: number | null; // Stream end flag (0=not ended, 1=ended)
   end_reason?: number | null; // Stream end reason code
-  stream_data?: string | null; // Decoded stream data (base64 decoded) - prioritized over payload content
   error?: string | null; // Error message from stream end event or API response
   event_meta?: StreamEventMeta | null; // Stream event metadata (new Stream API v2)
 }
@@ -1489,7 +1488,6 @@ export interface MessageSearchResult {
   channel_type: number | null;
   timestamp: number | null;
   payload: Record<string, any>;
-  stream_data: string | null;
   topic: string | null;
   preview_text: string | null;
   message_id_str: string; // String representation of message_id (required)

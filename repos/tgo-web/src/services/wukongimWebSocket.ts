@@ -638,15 +638,18 @@ export class WuKongIMWebSocketService {
           return null;
         })();
 
-        const newEventType = eventData?.event_type;
+        // event_type may be inside the data payload or at the top-level event.type
+        const newEventType = eventData?.event_type || event?.type;
         const clientMsgNo = eventData?.client_msg_no || event?.id;
 
         if (newEventType === WS_EVENT_TYPE.STREAM_DELTA) {
           const payload = eventData.payload;
-          if (payload?.kind === 'text' && payload?.delta) {
-            this.notifyStreamMessageHandlers(clientMsgNo, payload.delta);
-          } else if (payload?.kind === 'json_render') {
-            this.notifyJSONRenderMessageHandlers(clientMsgNo, payload);
+          const delta = payload?.delta;
+          if (delta) {
+            // All deltas (text, mixed content with spec fences) go through
+            // the unified stream handler. MixedStreamParser on the consumer
+            // side will split text vs JSONL patches automatically.
+            this.notifyStreamMessageHandlers(clientMsgNo, delta);
           }
           return;
         }

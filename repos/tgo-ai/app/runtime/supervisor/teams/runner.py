@@ -30,7 +30,7 @@ from agno.run.agent import RunOutput, RunStatus
 from agno.team import Team
 from agno.team.team import TeamRunOutput
 
-from app.json_render import JSON_RENDER_SPEC_FENCE_CLOSE, JSON_RENDER_SPEC_FENCE_OPEN, JsonRenderParser
+from app.json_render import JSON_RENDER_SPEC_FENCE_CLOSE, JSON_RENDER_SPEC_FENCE_OPEN
 from app.models.internal import CoordinationContext
 from app.schemas.agent_run import SupervisorRunResponse, SupervisorMetadata, AgentExecutionResult
 from app.runtime.supervisor.streaming.workflow_events import WorkflowEventEmitter
@@ -379,16 +379,11 @@ class AgnoTeamRunner:
         collector.team_run_id = event.run_id or collector.team_run_id or uuid.uuid4().hex
 
         content = self._ensure_text(getattr(event, "content", ""))
-        content, patches = collector.json_render_filter.filter_chunk(content)
-        if patches:
-            workflow_events.emit_json_render_update(
-                patches=patches,
-                team_id=event.team_id or collector.team_id,
-            )
-
         if not content:
             return
 
+        # Pass through raw content (including ```spec fences) directly.
+        # The frontend MixedStreamParser will handle splitting text vs JSONL patches.
         workflow_events.emit_team_run_content(
             team_id=event.team_id or collector.team_id,
             team_name=event.team_name or collector.team_name,
@@ -425,49 +420,10 @@ class AgnoTeamRunner:
         collector.team_run_event = event
         collector.team_run_id = event.run_id or collector.team_run_id or uuid.uuid4().hex
 
-        # Flush buffered text and patches before stream end.
-        remaining, flushed_patches = collector.json_render_filter.flush()
-        if remaining:
-            workflow_events.emit_team_run_content(
-                team_id=event.team_id or collector.team_id,
-                team_name=event.team_name or collector.team_name,
-                run_id=collector.team_run_id,
-                content=remaining,
-            )
-        if flushed_patches:
-            workflow_events.emit_json_render_update(
-                patches=flushed_patches,
-                team_id=event.team_id or collector.team_id,
-            )
-
         content = self._ensure_text(getattr(event, "content", ""))
         total_time = max(0.0, time.time() - collector.started_at)
 
-        # Parse fallback only when stream path did not emit any patch.
-        ui_mode = getattr(context, "ui_mode", None) if context is not None else None
-        if content and context is not None and ui_mode == "json_render" and not collector.json_render_filter.patch_emitted:
-            try:
-                json_render_result = JsonRenderParser().parse(content)
-                self._logger.info(
-                    "json-render parse result",
-                    has_json_render=json_render_result.has_json_render,
-                    is_valid=json_render_result.is_valid,
-                    patch_count=len(json_render_result.patches),
-                    validation_error=json_render_result.validation_error,
-                )
-                if json_render_result.has_json_render and json_render_result.patches:
-                    workflow_events.emit_json_render_update(
-                        patches=json_render_result.patches,
-                        text_content=json_render_result.text_content or None,
-                        team_id=event.team_id or collector.team_id,
-                    )
-                    content = json_render_result.text_content or content
-                    try:
-                        object.__setattr__(event, "content", content)
-                    except (AttributeError, TypeError):
-                        pass
-            except Exception as exc:  # noqa: BLE001
-                self._logger.warning("json-render parsing failed in team_run_completed", error=str(exc))
+        # json-render parsing is now handled entirely on the frontend via MixedStreamParser.
 
         workflow_events.emit_team_run_completed(
             team_id=event.team_id or collector.team_id,
@@ -564,17 +520,7 @@ class AgnoTeamRunner:
         if not content_chunk:
             return
 
-        content_chunk, patches = collector.json_render_filter.filter_chunk(content_chunk)
-        if patches:
-            workflow_events.emit_json_render_update(
-                patches=patches,
-                member_id=state.member_id,
-                team_id=collector.team_id,
-            )
-
-        if not content_chunk:
-            return
-
+        # Pass through raw content directly; frontend MixedStreamParser handles parsing.
         workflow_events.emit_team_member_content(
             team_id=collector.team_id,
             team_name=collector.team_name,

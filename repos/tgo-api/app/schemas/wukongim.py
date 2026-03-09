@@ -100,7 +100,7 @@ class WuKongIMMessage(BaseSchema):
     end: Optional[int] = Field(None, description="Stream end flag (0=not ended, 1=ended)")
     end_reason: Optional[int] = Field(None, description="Stream end reason code")
     error: Optional[str] = Field(None, description="Error message")
-    stream_data: Optional[str] = Field(None, description="Decoded stream data (base64 decoded)")
+    event_meta: Optional[Dict[str, Any]] = Field(None, description="Stream event metadata (snapshots, status)")
 
     @computed_field  # type: ignore[misc]
     @property

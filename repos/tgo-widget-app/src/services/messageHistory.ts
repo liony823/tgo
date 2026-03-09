@@ -31,7 +31,6 @@ export type WuKongIMMessage = {
   end?: number | null
   end_reason?: string | null
   error?: string | null  // AI 处理错误信息（与 payload 平级）
-  stream_data?: string | null
   event_meta?: StreamEventMeta | null  // Stream event metadata (new Stream API v2)
   setting_flags?: {
     receipt?: boolean

@@ -6,7 +6,6 @@ import './utils/debugAuth'; // Initialize debug utilities
 import './utils/logoutTest'; // Initialize logout test utilities
 import './utils/visitorApiTest'; // Initialize visitor API test utilities
 import './utils/visitorPanelTest'; // Initialize visitor panel test utilities
-import './utils/streamDataTest'; // Initialize stream_data test utilities
 import './utils/markdownTest'; // Initialize markdown test utilities
 import './utils/markdownValidation'; // Initialize markdown validation utilities
 import './utils/markdownDiagnostics'; // Initialize markdown diagnostics utilities

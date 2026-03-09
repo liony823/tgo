@@ -31,10 +31,6 @@ class MessageSearchResult(BaseSchema):
         default_factory=dict,
         description="Decoded message payload (base64 decoded when possible)",
     )
-    stream_data: Optional[str] = Field(
-        None,
-        description="Decoded stream data when applicable",
-    )
     topic: Optional[str] = Field(None, description="Message topic when available")
     preview_text: Optional[str] = Field(
         None,

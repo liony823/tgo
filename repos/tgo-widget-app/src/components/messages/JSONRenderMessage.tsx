@@ -12,29 +12,87 @@ interface JSONRenderMessageProps {
   showCursor?: boolean
 }
 
+// ---------------------------------------------------------------------------
+// Grouping helpers — split an ordered DataPart[] into runs of the same kind
+// so text and spec UI can be rendered in the original interleaved order.
+// ---------------------------------------------------------------------------
+
+type PartGroup =
+  | { type: 'text'; text: string }
+  | { type: 'spec'; parts: DataPart[] }
+
+function groupParts(parts: DataPart[]): PartGroup[] {
+  const groups: PartGroup[] = []
+  for (const part of parts) {
+    if (part.type === 'text') {
+      const last = groups[groups.length - 1]
+      if (last?.type === 'text') {
+        last.text += part.text || ''
+      } else {
+        groups.push({ type: 'text', text: part.text || '' })
+      }
+    } else {
+      const last = groups[groups.length - 1]
+      if (last?.type === 'spec') {
+        last.parts.push(part)
+      } else {
+        groups.push({ type: 'spec', parts: [part] })
+      }
+    }
+  }
+  return groups
+}
+
+// Sub-component: render a consecutive group of spec DataParts
+function JSONRenderGroup({ parts, onAction }: { parts: DataPart[]; onAction?: (name: string, ctx: Record<string, unknown>) => Promise<void> | void }) {
+  const { spec } = useJsonRenderMessage(parts)
+  if (!spec) return null
+  return <JSONRenderSurface spec={spec} onAction={onAction} />
+}
+
 export default function JSONRenderMessage({ message, onSendMessage, onAction, showCursor = false }: JSONRenderMessageProps) {
   const uiParts = useMemo(() => {
     return Array.isArray(message.uiParts) ? (message.uiParts as DataPart[]) : []
   }, [message.uiParts])
 
-  const { spec, text } = useJsonRenderMessage(uiParts)
+  const groups = useMemo(() => groupParts(uiParts), [uiParts])
 
+  const hasContent = groups.length > 0
+
+  // Fallback text for when there are no groups — strip spec fences to prevent raw JSON leaking
   const payloadText = message.payload.type === 1 ? message.payload.content : ''
-  const textContent = (message.streamData && message.streamData.trim())
+  const rawFallback = (message.streamData && message.streamData.trim())
     ? message.streamData
-    : (text && text.trim() ? text : payloadText)
+    : payloadText
+  const fallbackText = rawFallback.includes('```spec')
+    ? rawFallback.replace(/```spec[\s\S]*?```/g, '').replace(/```spec[\s\S]*/g, '').trim()
+    : rawFallback
 
-  if (!textContent && !spec) return null
+  if (!hasContent && !fallbackText) return null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '100%' }}>
-      {textContent ? (
-        <div>
-          <MarkdownContent content={textContent} onSendMessage={onSendMessage} />
-          {showCursor ? <Cursor /> : null}
-        </div>
-      ) : null}
-      {spec ? <JSONRenderSurface spec={spec} onAction={onAction} /> : null}
+      {hasContent ? (
+        groups.map((group, i) => {
+          if (group.type === 'text') {
+            if (!group.text.trim()) return null
+            return (
+              <div key={i}>
+                <MarkdownContent content={group.text} onSendMessage={onSendMessage} />
+                {showCursor && i === groups.length - 1 ? <Cursor /> : null}
+              </div>
+            )
+          }
+          return <JSONRenderGroup key={i} parts={group.parts} onAction={onAction} />
+        })
+      ) : (
+        fallbackText ? (
+          <div>
+            <MarkdownContent content={fallbackText} onSendMessage={onSendMessage} />
+            {showCursor ? <Cursor /> : null}
+          </div>
+        ) : null
+      )}
     </div>
   )
 }

@@ -25,15 +25,22 @@ export interface MessageComponentProps {
   onSendMessage?: (message: string) => void;
 }
 
+/** Strip ```spec fences from text to prevent leaking raw JSON patches if fences reach TextMessage. */
+function stripSpecFences(text: string): string {
+  return text.replace(/```spec[\s\S]*?```/g, '').replace(/```spec[\s\S]*/g, '').trim();
+}
+
 const TextMessage: React.FC<MessageComponentProps> = ({ message, isStaff, onSendMessage }) => {
   const typedPayload = message.payload as any | undefined;
   // Prefer message.content for streaming updates; fall back to payload content
-  const textContent: string =
+  const rawContent: string =
     (typeof message.content === 'string' && message.content.length > 0)
       ? message.content
       : ((typedPayload?.type === MessagePayloadType.TEXT && typeof typedPayload?.content === 'string')
           ? typedPayload.content
           : '');
+  // Safety net: strip spec fences if they somehow leak into TextMessage rendering
+  const textContent = rawContent.includes('```spec') ? stripSpecFences(rawContent) : rawContent;
 
   // Render streamed markdown only when has_stream_data flag exists
   const hasStreamData = Boolean(message.metadata?.has_stream_data);

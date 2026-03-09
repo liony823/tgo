@@ -1491,6 +1491,9 @@ class WuKongIMClient:
             "uid": uid,
             "version": version,
             "msg_count": msg_count,
+            "stream_v2": 1,
+            "include_event_meta": 1,
+            "event_summary_mode": "full",
         }
 
         if last_msg_seqs:
@@ -1523,20 +1526,8 @@ class WuKongIMClient:
                             # Decode the base64 payload to JSON
                             message["payload"] = self._decode_message_payload(message["payload"])
 
-                        if "stream_data" in message and isinstance(message["stream_data"], str):
-                            try:
-                                decoded_bytes = base64.b64decode(message["stream_data"])
-                                message["stream_data"] = decoded_bytes.decode("utf-8")
-                                logger.debug(
-                                    "Successfully decoded stream_data for conversation message %s",
-                                    message.get("message_id"),
-                                )
-                            except (binascii.Error, UnicodeDecodeError) as e:
-                                logger.warning(
-                                    "Failed to decode stream_data for conversation message %s: %s",
-                                    message.get("message_id"),
-                                    e,
-                                )
+                        # Remove stream_data from response — replaced by event_meta
+                        message.pop("stream_data", None)
 
             logger.info(f"Successfully synced {len(conversations)} conversations for user {uid}")
             # Convert to WuKongIMConversation objects
@@ -1575,6 +1566,9 @@ class WuKongIMClient:
             "uid": uid,
             "channels": channels,
             "msg_count": msg_count,
+            "stream_v2": 1,
+            "include_event_meta": 1,
+            "event_summary_mode": "full",
         }
 
         logger.info(
@@ -1603,20 +1597,8 @@ class WuKongIMClient:
                             # Decode the base64 payload to JSON
                             message["payload"] = self._decode_message_payload(message["payload"])
 
-                        if "stream_data" in message and isinstance(message["stream_data"], str):
-                            try:
-                                decoded_bytes = base64.b64decode(message["stream_data"])
-                                message["stream_data"] = decoded_bytes.decode("utf-8")
-                                logger.debug(
-                                    "Successfully decoded stream_data for conversation message %s",
-                                    message.get("message_id"),
-                                )
-                            except (binascii.Error, UnicodeDecodeError) as e:
-                                logger.warning(
-                                    "Failed to decode stream_data for conversation message %s: %s",
-                                    message.get("message_id"),
-                                    e,
-                                )
+                        # Remove stream_data from response — replaced by event_meta
+                        message.pop("stream_data", None)
 
             logger.info(f"Successfully synced {len(conversations)} conversations by channels for user {uid}")
             # Convert to WuKongIMConversation objects
@@ -1803,23 +1785,15 @@ class WuKongIMClient:
                 json_data=request_data,
             )
 
-            # Decode base64 payloads and stream_data in messages
+            # Decode base64 payloads in messages
             if "messages" in result and isinstance(result["messages"], list):
                 for message in result["messages"]:
                     # Decode the base64 payload to JSON
                     if "payload" in message and isinstance(message["payload"], str):
                         message["payload"] = self._decode_message_payload(message["payload"])
 
-                    # Decode the base64 stream_data if present
-                    if "stream_data" in message and isinstance(message["stream_data"], str):
-                        try:
-                            decoded_bytes = base64.b64decode(message["stream_data"])
-                            message["stream_data"] = decoded_bytes.decode('utf-8')
-                            logger.debug(f"Successfully decoded stream_data for message {message.get('message_id')}")
-                        except (binascii.Error, UnicodeDecodeError) as e:
-                            logger.warning(f"Failed to decode stream_data for message {message.get('message_id')}: {e}")
-                            # Keep original base64 string if decode fails
-                            pass
+                    # Remove stream_data from response — replaced by event_meta
+                    message.pop("stream_data", None)
 
             message_count = len(result.get("messages", []))
             logger.info(f"Successfully synced {message_count} channel messages for user {login_uid}")

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
+import { createMixedStreamParser, type MixedStreamParser } from '@json-render/core'
 import IMService from '../services/wukongim'
-import type { ChatMessage, MessagePayload, JSONRenderPatchPart } from '../types/chat'
+import type { ChatMessage, MessagePayload, MixedPart, JSONRenderPatchPart } from '../types/chat'
 import { isSystemMessageType } from '../types/chat'
 import { loadCachedVisitor, registerVisitor, saveCachedVisitor } from '../services/visitor'
 import { resolveApiKey } from '../utils/url'
@@ -24,6 +25,9 @@ let offCustom: null | (()=>void) = null
 // Streaming control timer (auto-revert if no end event)
 let streamTimer: ReturnType<typeof setTimeout> | null = null
 const STREAM_TIMEOUT_MS = 60000
+
+// Per-clientMsgNo MixedStreamParser instances for unified text+patch parsing
+const activeParsers = new Map<string, MixedStreamParser>()
 
 export type ChatConfig = {
   apiBase: string
@@ -69,6 +73,7 @@ export type ChatState = {
   markStreamingEnd: (clientMsgNo?: string) => void
   cancelStreaming: (reason?: string) => Promise<void>
   appendStreamData: (clientMsgNo: string, data: string) => void
+  appendMixedPart: (clientMsgNo: string, part: MixedPart) => void
   attachJSONRenderPatches: (clientMsgNo: string, patches: Record<string, unknown>[]) => void
   finalizeStreamMessage: (clientMsgNo: string, errorMessage?: string) => void
   ensureWelcomeMessage: (text: string) => void
@@ -87,7 +92,23 @@ function mapChannelTypeToString(t?: number): 'person' | 'group' {
   return 'group'
 }
 
+/**
+ * Try to parse a string as JSON, falling back to base64 decode + JSON parse.
+ * Real-time SDK messages arrive with base64-encoded payloads.
+ */
+function tryParsePayloadString(str: string): any | null {
+  try { return JSON.parse(str) } catch {}
+  try { return JSON.parse(atob(str)) } catch {}
+  return null
+}
+
 function toPayloadFromAny(raw: any): MessagePayload {
+  // If raw is a base64-encoded or JSON string, decode it first
+  if (typeof raw === 'string') {
+    const parsed = tryParsePayloadString(raw)
+    if (parsed && typeof parsed === 'object') return toPayloadFromAny(parsed)
+    return { type: 1, content: raw }
+  }
   const t = raw?.type
   if (t === 1 && typeof raw?.content === 'string') return { type: 1, content: raw.content }
   if (t === 2 && typeof raw?.url === 'string' && typeof raw?.width === 'number' && typeof raw?.height === 'number') {
@@ -112,7 +133,6 @@ function toPayloadFromAny(raw: any): MessagePayload {
   if (typeof t === 'number' && isSystemMessageType(t) && typeof raw?.content === 'string') {
     return { type: t, content: raw.content, extra: Array.isArray(raw?.extra) ? raw.extra : undefined }
   }
-  if (typeof raw === 'string') return { type: 1, content: raw }
   return { type: 1, content: typeof raw?.content === 'string' ? raw.content : JSON.stringify(raw ?? {}) }
 }
 
@@ -145,13 +165,54 @@ function mapHistoryToChatMessage(m: WuKongIMMessage, myUid?: string): ChatMessag
       streamContent = mainEvent.snapshot.text
     }
   }
-  // Priority 1: Legacy stream_data
-  const isStreamEnded = m?.setting_flags?.stream === true && m?.end === 1 && typeof m?.stream_data === 'string' && m.stream_data.length > 0
-  const payload: MessagePayload = streamContent
-    ? { type: 1, content: streamContent }
-    : isStreamEnded
-      ? { type: 1, content: m.stream_data as string }
-      : toPayloadFromAny(m?.payload)
+  // Parse mixed content from historical snapshot using MixedStreamParser
+  let uiParts: MixedPart[] | undefined
+  const rawContent = streamContent
+  if (rawContent) {
+    try {
+      const parts: MixedPart[] = []
+      const parser = createMixedStreamParser({
+        onText: (text) => parts.push({ type: 'text', text: text + '\n' }),
+        onPatch: (patch) => parts.push({ type: 'data-spec', data: { type: 'patch', patch } }),
+      })
+      // Normalise so ```spec is always at the start of its own line
+      const normalised = rawContent.replace(/([^\n])```spec/g, '$1\n```spec')
+      parser.push(normalised)
+      parser.flush()
+
+      // Backwards compatibility: old messages may have a separate "json_render"
+      // event channel whose snapshot.text contains concatenated JSON patch arrays.
+      if (m?.event_meta?.has_events) {
+        const jrEvent = m.event_meta.events?.find((e: any) => e.event_key === 'json_render' && e.snapshot?.text)
+        if (jrEvent?.snapshot?.text) {
+          try {
+            const normalised = '[' + jrEvent.snapshot.text.replace(/\]\s*\[/g, ',') + ']'
+            const outer = JSON.parse(normalised)
+            const flat: any[] = Array.isArray(outer) ? outer.flat(Infinity) : [outer]
+            for (const patch of flat) {
+              if (patch && typeof patch === 'object' && 'op' in patch && 'path' in patch) {
+                parts.push({ type: 'data-spec', data: { type: 'patch', patch } })
+              }
+            }
+          } catch { /* ignore legacy parse failures */ }
+        }
+      }
+
+      if (parts.length > 0 && parts.some(p => p.type !== 'text' || (p.text && p.text.trim()))) {
+        uiParts = parts
+      }
+    } catch (e) {
+      console.warn('Failed to parse mixed stream content for historical message:', e)
+    }
+  }
+
+  const displayContent = uiParts
+    ? uiParts.filter(p => p.type === 'text').map(p => p.text || '').join('')
+    : streamContent
+
+  const payload: MessagePayload = displayContent
+    ? { type: 1, content: displayContent }
+    : toPayloadFromAny(m?.payload)
   // 检查消息的 error 字段（与 payload 平级）
   const errorMessage = m?.error ? String(m.error) : undefined
   return {
@@ -165,6 +226,7 @@ function mapHistoryToChatMessage(m: WuKongIMMessage, myUid?: string): ChatMessag
     channelId: m.channel_id ? String(m.channel_id) : undefined,
     channelType: typeof m.channel_type === 'number' ? m.channel_type : undefined,
     errorMessage,
+    ...(uiParts ? { uiParts } : {}),
   }
 }
 
@@ -343,23 +405,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return null
           })()
 
-          const newEventType = eventData?.event_type as string | undefined
+          // event_type may be inside the data payload or at the top-level event.type
+          const newEventType = (eventData?.event_type || customEvent?.type) as string | undefined
           const clientMsgNo = eventData?.client_msg_no ? String(eventData.client_msg_no) : (customEvent?.id ? String(customEvent.id) : '')
 
           if (newEventType === 'stream.delta') {
             if (!clientMsgNo) return
             const payload = eventData?.payload
-            if (payload?.kind === 'text' && payload?.delta) {
-              get().appendStreamData(clientMsgNo, payload.delta)
-            } else if (payload?.kind === 'json_render') {
-              const patches = normalizeJSONRenderPatches(payload?.patches)
-              if (patches.length > 0) get().attachJSONRenderPatches(clientMsgNo, patches)
+            const delta = payload?.delta
+            if (delta) {
+              // All deltas go through MixedStreamParser which splits text vs JSONL patches
+              let parser = activeParsers.get(clientMsgNo)
+              if (!parser) {
+                parser = createMixedStreamParser({
+                  onText: (text) => {
+                    // Append '\n' stripped by line-based parser so merged text keeps line breaks
+                    get().appendMixedPart(clientMsgNo, { type: 'text', text: text + '\n' })
+                  },
+                  onPatch: (patch) => {
+                    get().appendMixedPart(clientMsgNo, { type: 'data-spec', data: { type: 'patch', patch } })
+                  },
+                })
+                activeParsers.set(clientMsgNo, parser)
+              }
+              // Normalise so ```spec is always at the start of its own line
+              parser.push(delta.replace(/([^\n])```spec/g, '$1\n```spec'))
             }
             return
           }
 
           if (newEventType === 'stream.close') {
             if (!clientMsgNo) return
+            // Flush parser before finalizing
+            const closeParser = activeParsers.get(clientMsgNo)
+            if (closeParser) { closeParser.flush(); activeParsers.delete(clientMsgNo) }
             const errorMessage = eventData?.payload?.end_reason > 0 ? '流异常结束' : undefined
             console.log('[Chat] Stream closed for message:', clientMsgNo, errorMessage ? `error: ${errorMessage}` : '')
             get().finalizeStreamMessage(clientMsgNo, errorMessage)
@@ -369,6 +448,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           if (newEventType === 'stream.error') {
             if (!clientMsgNo) return
+            const errParser = activeParsers.get(clientMsgNo)
+            if (errParser) { errParser.flush(); activeParsers.delete(clientMsgNo) }
             const errorMessage = eventData?.payload?.error || '未知错误'
             console.log('[Chat] Stream error for message:', clientMsgNo, errorMessage)
             get().finalizeStreamMessage(clientMsgNo, errorMessage)
@@ -378,6 +459,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           if (newEventType === 'stream.cancel') {
             if (!clientMsgNo) return
+            const cancelParser = activeParsers.get(clientMsgNo)
+            if (cancelParser) { cancelParser.flush(); activeParsers.delete(clientMsgNo) }
             console.log('[Chat] Stream cancelled for message:', clientMsgNo)
             get().finalizeStreamMessage(clientMsgNo)
             try { get().markStreamingEnd() } catch {}
@@ -953,6 +1036,49 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // If streaming state isn't set yet, set it based on incoming stream
     const st = get()
     if (!st.isStreaming) { try { get().markStreamingStart(clientMsgNo) } catch {} }
+  },
+
+  appendMixedPart: (clientMsgNo: string, part: MixedPart) => {
+    if (!clientMsgNo) return
+    set(state => {
+      let found = false
+      const messages = state.messages.map(m => {
+        if (m.clientMsgNo && m.clientMsgNo === clientMsgNo) {
+          found = true
+          const parts: MixedPart[] = [...(m.uiParts ?? [])]
+          // Merge consecutive text parts
+          if (part.type === 'text' && parts.length > 0) {
+            const last = parts[parts.length - 1]
+            if (last.type === 'text') {
+              parts[parts.length - 1] = { type: 'text', text: (last.text || '') + (part.text || '') }
+              // Also update streamData for preview
+              const textContent = parts.filter(p => p.type === 'text').map(p => p.text || '').join('')
+              return { ...m, uiParts: parts, streamData: textContent }
+            }
+          }
+          parts.push(part)
+          const textContent = parts.filter(p => p.type === 'text').map(p => p.text || '').join('')
+          return { ...m, uiParts: parts, streamData: textContent }
+        }
+        return m
+      })
+      if (found) return { messages }
+      // Not found: create a placeholder
+      const initParts: MixedPart[] = [part]
+      const placeholder: ChatMessage = {
+        id: `stream-${clientMsgNo}`,
+        role: 'agent',
+        payload: { type: 1, content: '' },
+        time: new Date(),
+        clientMsgNo,
+        uiParts: initParts,
+        streamData: part.type === 'text' ? (part.text || '') : '',
+      }
+      return { messages: [...state.messages, placeholder] }
+    })
+    // If streaming state isn't set yet, set it based on incoming stream
+    const st2 = get()
+    if (!st2.isStreaming) { try { get().markStreamingStart(clientMsgNo) } catch {} }
   },
 
   attachJSONRenderPatches: (clientMsgNo: string, patches: Record<string, unknown>[]) => {

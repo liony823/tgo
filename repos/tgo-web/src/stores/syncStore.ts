@@ -66,12 +66,11 @@ export const useSyncStore = create<SyncState>()(
               )
             : null;
 
-        // Debug: Log the latest message to see if stream_data is present
+        // Debug: Log the latest message
         if (latestWkMsg) {
           console.log('📋 convertWuKongIMToChat - Latest message:', {
             message_seq: latestWkMsg.message_seq,
-            has_stream_data: !!latestWkMsg.stream_data,
-            stream_data_preview: latestWkMsg.stream_data ? latestWkMsg.stream_data.substring(0, 50) : 'N/A',
+            has_event_meta: !!latestWkMsg.event_meta?.has_events,
             payload_type: typeof latestWkMsg.payload,
             payload_preview:
               typeof latestWkMsg.payload === 'object'
@@ -129,7 +128,7 @@ export const useSyncStore = create<SyncState>()(
 
           response = await WuKongIMApiService.syncConversationsInitial(20, { tag_ids: mineTagIds });
 
-          // Debug: Log sync response to see if stream_data is present
+          // Debug: Log sync response
           console.log('📋 syncConversations - API response:', {
             conversationCount: response.conversations.length,
             conversations: response.conversations.map((conv) => ({
@@ -137,8 +136,7 @@ export const useSyncStore = create<SyncState>()(
               recentsCount: conv.recents.length,
               recents: conv.recents.map((msg) => ({
                 message_seq: msg.message_seq,
-                has_stream_data: !!msg.stream_data,
-                stream_data_preview: msg.stream_data ? msg.stream_data.substring(0, 50) : 'N/A',
+                has_event_meta: !!msg.event_meta?.has_events,
                 payload_type: typeof msg.payload,
               })),
             })),

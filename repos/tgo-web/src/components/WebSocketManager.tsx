@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createMixedStreamParser, type MixedStreamParser } from '@json-render/core';
 import { useAuthStore } from '../stores/authStore';
 import { useChatStore } from '../stores/chatStore';
 import { useChannelStore } from '../stores/channelStore';
@@ -16,6 +17,15 @@ import { Message } from '../types';
 import { isWebSocketAutoConnectDisabled } from '@/utils/config';
 
 /**
+ * Ensure ```spec fence markers are on their own lines.
+ * The LLM sometimes emits "text```spec" on the same line, but the parser
+ * only recognises fence openers at the start of a line (after trim).
+ */
+function normalizeSpecFences(chunk: string): string {
+  return chunk.replace(/([^\n])```spec/g, '$1\n```spec');
+}
+
+/**
  * Centralized WebSocket manager component
  * This component should be rendered ONCE at the app level to manage
  * the single WebSocket connection and prevent multiple connection attempts.
@@ -25,11 +35,13 @@ export const WebSocketManager: React.FC = () => {
   const token = useAuthStore(state => state.token);
   const user = useAuthStore(state => state.user);
   const handleRealtimeMessage = useChatStore(state => state.handleRealtimeMessage);
-  const appendStreamMessageContent = useChatStore(state => state.appendStreamMessageContent);
+  const appendMixedPart = useChatStore(state => state.appendMixedPart);
   const markStreamMessageEnd = useChatStore(state => state.markStreamMessageEnd);
   const markStreamMessageFinish = useChatStore(state => state.markStreamMessageFinish);
-  const attachJSONRenderPatches = useChatStore(state => state.attachJSONRenderPatches);
   const activeChat = useChatStore(state => state.activeChat);
+
+  // Per-clientMsgNo MixedStreamParser instances
+  const parsersRef = React.useRef<Map<string, MixedStreamParser>>(new Map());
   
   // Get connection/notification actions from uiStore
   const uiPreferences = useUIStore(state => state.preferences);
@@ -134,18 +146,31 @@ export const WebSocketManager: React.FC = () => {
   }, []);
 
   /**
-   * Handle AI stream messages (incremental updates)
+   * Handle AI stream messages (incremental updates).
+   * Uses MixedStreamParser to split text and json-render patches in order.
    */
   const handleStreamMessage = React.useCallback((clientMsgNo: string, content: string) => {
-
     try {
-      // Append content to the message
-      appendStreamMessageContent(clientMsgNo, content);
-      console.log('🤖 WebSocket Manager: Stream message content appended successfully');
+      let parser = parsersRef.current.get(clientMsgNo);
+      if (!parser) {
+        parser = createMixedStreamParser({
+          onText: (text) => {
+            // Append '\n' that was stripped by the line-based parser so
+            // merged text parts retain their original line breaks.
+            appendMixedPart(clientMsgNo, { type: 'text', text: text + '\n' });
+          },
+          onPatch: (patch) => {
+            appendMixedPart(clientMsgNo, { type: 'data-spec', data: { type: 'patch', patch } });
+          },
+        });
+        parsersRef.current.set(clientMsgNo, parser);
+      }
+      // Normalise so ```spec is always at the start of its own line
+      parser.push(normalizeSpecFences(content));
     } catch (error) {
-      console.error('🤖 WebSocket Manager: Error appending stream message content:', error);
+      console.error('🤖 WebSocket Manager: Error in stream message handler:', error);
     }
-  }, [appendStreamMessageContent]);
+  }, [appendMixedPart]);
 
   /**
    * Handle AI stream end events
@@ -154,6 +179,12 @@ export const WebSocketManager: React.FC = () => {
    */
   const handleStreamEnd = React.useCallback((clientMsgNo: string, error?: string) => {
     try {
+      // Flush any remaining buffered content in the parser
+      const parser = parsersRef.current.get(clientMsgNo);
+      if (parser) {
+        parser.flush();
+        parsersRef.current.delete(clientMsgNo);
+      }
       markStreamMessageEnd(clientMsgNo, error);
       if (error) {
         console.log('🤖 WebSocket Manager: Stream message ended with error:', error);
@@ -176,18 +207,6 @@ export const WebSocketManager: React.FC = () => {
       console.error('🤖 WebSocket Manager: Error marking stream message finish:', err);
     }
   }, [markStreamMessageFinish]);
-
-  /**
-   * Handle json-render patch messages from the AI agent.
-   */
-  const handleJSONRenderMessage = React.useCallback((clientMsgNo: string, payload: { patches: Record<string, unknown>[] }) => {
-    try {
-      attachJSONRenderPatches(clientMsgNo, payload.patches);
-      console.log('🎨 WebSocket Manager: json-render patches attached to message', { clientMsgNo, patchCount: payload.patches.length });
-    } catch (error) {
-      console.error('🎨 WebSocket Manager: Error attaching json-render patches:', error);
-    }
-  }, [attachJSONRenderPatches]);
 
   /**
    * Handle visitor presence events (visitor.online / visitor.offline)
@@ -285,7 +304,6 @@ export const WebSocketManager: React.FC = () => {
     const unsubscribeStreamMessage = wukongimWebSocketService.onStreamMessage(handleStreamMessage);
     const unsubscribeStreamEnd = wukongimWebSocketService.onStreamEnd(handleStreamEnd);
     const unsubscribeStreamFinish = wukongimWebSocketService.onStreamFinish(handleStreamFinish);
-    const unsubscribeJSONRenderMessage = wukongimWebSocketService.onJSONRenderMessage(handleJSONRenderMessage);
     const unsubscribePresence = wukongimWebSocketService.onVisitorPresence(handlePresenceEvent);
     const unsubscribeProfileUpdated = wukongimWebSocketService.onVisitorProfileUpdated(handleVisitorProfileUpdated);
 
@@ -298,11 +316,10 @@ export const WebSocketManager: React.FC = () => {
       unsubscribeStreamMessage();
       unsubscribeStreamEnd();
       unsubscribeStreamFinish();
-      unsubscribeJSONRenderMessage();
       unsubscribePresence();
       unsubscribeProfileUpdated();
     };
-  }, [handleMessage, handleConnectionStatus, handleError, handleStreamMessage, handleStreamEnd, handleStreamFinish, handleJSONRenderMessage, handlePresenceEvent, handleVisitorProfileUpdated]);
+  }, [handleMessage, handleConnectionStatus, handleError, handleStreamMessage, handleStreamEnd, handleStreamFinish, handlePresenceEvent, handleVisitorProfileUpdated]);
 
   /**
    * Auto-connect when token and user are available

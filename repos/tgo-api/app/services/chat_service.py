@@ -156,10 +156,9 @@ async def forward_ai_event_to_wukongim(
 
     Flow:
       team_run_started  → send_stream_message (anchor with is_stream=1)
-      team_run_content  → send_stream_event (stream.delta)
+      team_run_content  → send_stream_event (stream.delta, raw mixed content)
       team_run_completed → send_stream_event (stream.close + stream.finish)
       team_run_failed   → send_stream_event (stream.error)
-      json_render_update → send_stream_event (stream.delta with kind=json_render)
     """
     try:
         data = event_data.get("data") or {}
@@ -185,10 +184,6 @@ async def forward_ai_event_to_wukongim(
 
             if chunk_text is not None:
                 chunk_str = str(chunk_text)
-                # Safety: if spec fence leaked into text path, drop fence and everything after.
-                _spec_fence_open = "```spec"
-                if _spec_fence_open in chunk_str:
-                    chunk_str = chunk_str.split(_spec_fence_open, 1)[0]
                 if not chunk_str:
                     return None
                 await wukongim_client.send_stream_event(
@@ -235,22 +230,6 @@ async def forward_ai_event_to_wukongim(
                 event_key="main",
                 from_uid=from_uid,
                 payload={"error": str(error_message)},
-            )
-
-        elif event_type == "json_render_update":
-            await wukongim_client.send_stream_event(
-                channel_id=channel_id,
-                channel_type=channel_type,
-                client_msg_no=client_msg_no,
-                event_id=uuid4().hex,
-                event_type="stream.delta",
-                event_key="main",
-                from_uid=from_uid,
-                payload={
-                    "kind": "json_render",
-                    "patches": data.get("patches", []),
-                    "text_content": data.get("text_content"),
-                },
             )
 
     except Exception as e:

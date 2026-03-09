@@ -68,6 +68,13 @@ export type JSONRenderPatchPart = {
   }
 }
 
+/** Generic mixed part — text or data-spec patch. */
+export type MixedPart = {
+  type: string
+  text?: string
+  data?: unknown
+}
+
 export type SystemMessagePayload = {
   type: number // 1000-2000
   content: string
@@ -109,7 +116,7 @@ export interface StreamEventMeta {
   event_version: number;
   last_msg_event_seq: number;
   event_count: number;
-  open_event_count: number;
+  open_event_count?: number;
   events: Array<{
     event_key: string;
     status: string;           // "open" | "closed" | "error" | "cancelled"
@@ -132,8 +139,8 @@ export type ChatMessage = {
   channelType?: number
   // Incremental streaming data (if present, prefer displaying this)
   streamData?: string
-  // json-render incremental data parts (SpecStream patches)
-  uiParts?: JSONRenderPatchPart[]
+  // json-render incremental data parts (mixed text + spec patches, ordered)
+  uiParts?: MixedPart[]
   // Transient state while uploading/sending
   status?: MessageStatus
   // Upload progress & error (for attachments)

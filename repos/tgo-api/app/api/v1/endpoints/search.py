@@ -49,7 +49,6 @@ def _build_message_result(raw: dict) -> dict:
         "channel_type": raw.get("channel_type"),
         "timestamp": raw.get("timestamp"),
         "payload": payload_obj,
-        "stream_data": raw.get("stream_data"),
         "preview_text": preview_text,
     }
 

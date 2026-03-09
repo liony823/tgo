@@ -90,6 +90,7 @@ interface ChatState {
   setHistoryError: (error: string | null) => void;
   getChannelMessages: (channelId: string, channelType: number) => WuKongIMMessage[];
   appendStreamMessageContent: (clientMsgNo: string, content: string) => void;
+  appendMixedPart: (clientMsgNo: string, part: { type: string; text?: string; data?: unknown }) => void;
   markStreamMessageEnd: (clientMsgNo: string, error?: string) => void;
   markStreamMessageFinish: (clientMsgNo: string) => void;
   cancelStreamingMessage: (clientMsgNo?: string) => Promise<void>;
@@ -326,6 +327,14 @@ export const useChatStore = create<ChatState>()(
               messages: msgState.messages,
               historicalMessages: msgState.historicalMessages,
             }, false, 'appendStreamMessageContent');
+          },
+          appendMixedPart: (clientMsgNo, part) => {
+            useMessageStore.getState().appendMixedPart(clientMsgNo, part);
+            const msgState = useMessageStore.getState();
+            set({
+              messages: msgState.messages,
+              historicalMessages: msgState.historicalMessages,
+            }, false, 'appendMixedPart');
           },
           attachJSONRenderPatches: (clientMsgNo, patches) => {
             useMessageStore.getState().attachJSONRenderPatches(clientMsgNo, patches);

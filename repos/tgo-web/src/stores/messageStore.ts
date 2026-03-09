@@ -8,6 +8,11 @@ import { MESSAGE_SENDER_TYPE, STORAGE_KEYS } from '@/constants';
 // Track channels currently loading history to prevent duplicate requests
 const loadingHistoryChannels = new Set<string>();
 
+/** Extract plain text from ui_parts for preview / search. */
+function buildPlainText(parts: Array<{ type: string; text?: string }>): string {
+  return parts.filter(p => p.type === 'text').map(p => p.text || '').join('');
+}
+
 /**
  * Stream End Reason constants - matches backend definitions
  * Used to indicate why a stream was completed
@@ -78,6 +83,7 @@ interface MessageState {
 
   // Actions - 流式消息
   appendStreamMessageContent: (clientMsgNo: string, content: string) => void;
+  appendMixedPart: (clientMsgNo: string, part: { type: string; text?: string; data?: unknown }) => void;
   markStreamMessageEnd: (clientMsgNo: string, error?: string) => void;
   markStreamMessageFinish: (clientMsgNo: string) => void;
   cancelStreamingMessage: (clientMsgNo?: string) => Promise<void>;
@@ -441,28 +447,7 @@ export const useMessageStore = create<MessageState>()(
           }
 
           if (foundInHistory && historyChannelKey !== null && historyMessageIndex !== -1) {
-            // Update historical message
-            const historyMessage = state.historicalMessages[historyChannelKey][historyMessageIndex];
-            const oldStreamData = historyMessage.stream_data || '';
-            const newStreamData = oldStreamData + content;
-
-            set(
-              (s) => {
-                const updatedHistoricalMessages = { ...s.historicalMessages };
-                const channelMessages = [...(updatedHistoricalMessages[historyChannelKey!] || [])];
-                if (channelMessages[historyMessageIndex]) {
-                  channelMessages[historyMessageIndex] = {
-                    ...channelMessages[historyMessageIndex],
-                    stream_data: newStreamData,
-                  };
-                  updatedHistoricalMessages[historyChannelKey!] = channelMessages;
-                }
-
-                return { historicalMessages: updatedHistoricalMessages };
-              },
-              false,
-              'appendStreamMessageContent:historical'
-            );
+            // Historical messages now use event_meta; no stream_data to append.
             return;
           }
 
@@ -509,6 +494,78 @@ export const useMessageStore = create<MessageState>()(
           },
           false,
           'appendStreamMessageContent:realtime'
+        );
+      },
+
+      appendMixedPart: (clientMsgNo: string, part: { type: string; text?: string; data?: unknown }) => {
+        const state = get();
+
+        // 1. Update tracked streaming channel preview
+        const tracked = state.activeStreamingChannels[clientMsgNo];
+        if (tracked && part.type === 'text' && part.text) {
+          const newTrackedContent = tracked.content + part.text;
+          set(
+            (s) => ({
+              activeStreamingChannels: {
+                ...s.activeStreamingChannels,
+                [clientMsgNo]: { ...tracked, content: newTrackedContent },
+              },
+            }),
+            false,
+            'appendMixedPart:tracked'
+          );
+          const onUpdate = get().onConversationPreviewUpdate;
+          if (onUpdate) {
+            onUpdate(tracked.channelId, tracked.channelType, newTrackedContent);
+          }
+        }
+
+        // 2. Find message in realtime list
+        const messageIndex = state.messages.findIndex((msg) => msg.clientMsgNo === clientMsgNo);
+        if (messageIndex === -1) {
+          // Try historical messages
+          for (const [, messages] of Object.entries(state.historicalMessages)) {
+            const idx = messages.findIndex((msg) => msg.client_msg_no === clientMsgNo);
+            if (idx !== -1) {
+              // Historical messages now use event_meta; skip appendMixedPart.
+              return;
+            }
+          }
+          return;
+        }
+
+        // 3. Update realtime message ui_parts
+        set(
+          (s) => ({
+            messages: s.messages.map((msg, idx) => {
+              if (idx !== messageIndex) return msg;
+              const meta = msg.metadata ?? {};
+              const parts: Array<{ type: string; text?: string; data?: unknown }> =
+                Array.isArray(meta.ui_parts) ? [...(meta.ui_parts as any)] : [];
+
+              // Merge consecutive text parts
+              if (part.type === 'text' && parts.length > 0) {
+                const last = parts[parts.length - 1];
+                if (last.type === 'text') {
+                  parts[parts.length - 1] = { type: 'text', text: (last.text || '') + (part.text || '') };
+                  return {
+                    ...msg,
+                    content: buildPlainText(parts),
+                    metadata: { ...meta, ui_parts: parts, stream_started: true, is_streaming: true, has_stream_data: true },
+                  };
+                }
+              }
+
+              parts.push(part);
+              return {
+                ...msg,
+                content: buildPlainText(parts),
+                metadata: { ...meta, ui_parts: parts, stream_started: true, is_streaming: true, has_stream_data: true },
+              };
+            }),
+          }),
+          false,
+          'appendMixedPart'
         );
       },
 

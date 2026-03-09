@@ -3,6 +3,7 @@
  * Handles WuKongIM conversation synchronization and messaging API endpoints
  */
 
+import { createMixedStreamParser } from '@json-render/core';
 import { BaseApiService } from './base/BaseApiService';
 
 import { CHANNEL_TYPE, DEFAULT_CHANNEL_TYPE, MESSAGE_SENDER_TYPE, PlatformType, STAFF_UID_SUFFIX } from '@/constants';
@@ -294,6 +295,23 @@ export class WuKongIMApiService extends BaseApiService {
  */
 export class WuKongIMUtils {
   /**
+   * Try to parse a string payload as JSON, falling back to base64 decode + JSON parse.
+   * Real-time SDK messages arrive with base64-encoded payloads; historical messages are pre-decoded.
+   */
+  static tryParsePayloadString(str: string): any | null {
+    try {
+      return JSON.parse(str);
+    } catch {
+      // Not direct JSON — try base64 decode
+      try {
+        return JSON.parse(atob(str));
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  /**
    * Get channel type name from channel type number
    */
   static getChannelTypeName(channelType: number): string {
@@ -337,12 +355,12 @@ export class WuKongIMUtils {
   }
 
   /**
-   * Extract message content from WuKongIM message (supports stream_data, payload object, and legacy string format)
+   * Extract message content from WuKongIM message (supports event_meta, payload object, and legacy string format)
    * @param wkMessage - WuKongIM message object
    * @returns Extracted message content string
    */
-  static extractMessageContent(wkMessage: WuKongIMMessage | { payload: WuKongIMMessagePayload | string; stream_data?: string | null; event_meta?: any }): string {
-    // Priority 0: Use event_meta.events main channel snapshot (new Stream API v2)
+  static extractMessageContent(wkMessage: WuKongIMMessage | { payload: WuKongIMMessagePayload | string; event_meta?: any }): string {
+    // Priority 0: Use event_meta.events main channel snapshot (Stream API v2)
     if ('event_meta' in wkMessage && wkMessage.event_meta?.has_events) {
       const mainEvent = wkMessage.event_meta.events?.find((e: any) => e.event_key === 'main');
       if (mainEvent?.snapshot?.kind === 'text' && mainEvent.snapshot.text) {
@@ -350,12 +368,7 @@ export class WuKongIMUtils {
       }
     }
 
-    // Priority 1: Use stream_data if available and not empty (legacy compatibility)
-    if ('stream_data' in wkMessage && wkMessage.stream_data && wkMessage.stream_data.trim() !== '') {
-      return wkMessage.stream_data;
-    }
-
-    // Priority 2: Extract from payload
+    // Priority 1: Extract from payload
     const payload = wkMessage.payload as any;
 
     // Handle new object format
@@ -375,28 +388,22 @@ export class WuKongIMUtils {
       return payload.content || '';
     }
 
-    // Handle legacy string format (backward compatibility)
+    // Handle string format (JSON string or base64-encoded payload from SDK)
     if (typeof payload === 'string') {
-      try {
-        // Try to parse as JSON (old format where payload was JSON string)
-        const parsed = JSON.parse(payload);
-        // Check if it's the new object format embedded in string
-        if (parsed && typeof parsed === 'object' && parsed.content !== undefined) {
-          // 处理系统消息 (type: 1000-2000) 的模板替换
-          if (typeof parsed.type === 'number' && isSystemMessageType(parsed.type)) {
-            return WuKongIMUtils.formatSystemMessageContent(parsed.content, parsed.extra);
-          }
-          if (parsed.type === MessagePayloadType.STREAM) {
-            return parsed.content || 'AI 正在输入...';
-          }
-          return parsed.content || (parsed.type === MessagePayloadType.IMAGE ? '[图片]' : '');
+      const parsed = WuKongIMUtils.tryParsePayloadString(payload);
+      if (parsed && typeof parsed === 'object' && parsed.content !== undefined) {
+        if (typeof parsed.type === 'number' && isSystemMessageType(parsed.type)) {
+          return WuKongIMUtils.formatSystemMessageContent(parsed.content, parsed.extra);
         }
-        // Fallback to old parsing logic
-        return parsed.content || parsed.text || (parsed.type === 2 ? '[图片]' : payload);
-      } catch {
-        // If JSON parsing fails, return the string as-is
-        return payload;
+        if (parsed.type === MessagePayloadType.STREAM) {
+          return parsed.content || 'AI 正在输入...';
+        }
+        return parsed.content || (parsed.type === MessagePayloadType.IMAGE ? '[图片]' : '');
       }
+      if (parsed) {
+        return parsed.content || parsed.text || (parsed.type === 2 ? '[图片]' : payload);
+      }
+      return payload;
     }
 
     // Fallback for any other type
@@ -450,7 +457,7 @@ export class WuKongIMUtils {
     if (typeof rawPayload === 'object' && rawPayload !== null) {
       payloadObj = rawPayload;
     } else if (typeof rawPayload === 'string') {
-      try { payloadObj = JSON.parse(rawPayload); } catch {}
+      payloadObj = WuKongIMUtils.tryParsePayloadString(rawPayload);
     }
 
     let imageMeta: Record<string, any> = {};
@@ -503,6 +510,9 @@ export class WuKongIMUtils {
       fileMeta = { file_url: url || url0, file_name: name, file_size: size };
     } else if (payloadType === MessagePayloadType.TEXT) {
       typedPayload = { type: MessagePayloadType.TEXT, content };
+    } else if (payloadType === MessagePayloadType.STREAM) {
+      // For completed stream messages loaded from history, treat as TEXT so they render properly
+      typedPayload = { type: MessagePayloadType.TEXT, content };
     }
 
     // 处理系统消息 (payload.type 在 1000-2000 范围内)
@@ -516,19 +526,65 @@ export class WuKongIMUtils {
     }
 
     // Determine if this is a streaming message that's still in progress
-    // Check new event_meta first, then fall back to legacy stream_data logic
-    let hasStreamData = !!(wkMessage.stream_data && wkMessage.stream_data.trim() !== '');
-    let isStreamingInProgress = hasStreamData && wkMessage.end !== 1;
+    let hasStreamData = !!wkMessage.event_meta?.has_events;
+    let isStreamingInProgress = hasStreamData && (wkMessage.event_meta?.open_event_count ?? 0) > 0;
 
-    if (wkMessage.event_meta?.has_events) {
-      hasStreamData = true;
-      isStreamingInProgress = wkMessage.event_meta.open_event_count > 0;
+    // Parse mixed content (text + json-render spec fences) from historical snapshot
+    let uiParts: Array<{ type: string; text?: string; data?: unknown }> | undefined;
+    if (hasStreamData && content) {
+      try {
+        const parts: Array<{ type: string; text?: string; data?: unknown }> = [];
+        const parser = createMixedStreamParser({
+          onText: (text) => parts.push({ type: 'text', text: text + '\n' }),
+          onPatch: (patch) => parts.push({ type: 'data-spec', data: { type: 'patch', patch } }),
+        });
+        // Normalise so ```spec is always at the start of its own line.
+        // The LLM sometimes emits "text```spec" mid-line; the parser only
+        // recognises fence openers when they start the line (after trim).
+        const normalised = content.replace(/([^\n])```spec/g, '$1\n```spec');
+        parser.push(normalised);
+        parser.flush();
+
+        // Backwards compatibility: old messages may have a separate "json_render"
+        // event channel whose snapshot.text contains concatenated JSON patch arrays.
+        // Extract those patches and append as data-spec parts so old UIs still render.
+        if (wkMessage.event_meta?.has_events) {
+          const jsonRenderEvent = wkMessage.event_meta.events?.find(
+            (e: any) => e.event_key === 'json_render' && e.snapshot?.text
+          );
+          if (jsonRenderEvent?.snapshot?.text) {
+            try {
+              // snapshot.text is concatenated JSON arrays, e.g. '[{...}][{...}]'
+              // Normalise to a single array: replace '][' with ','
+              const normalised = '[' + jsonRenderEvent.snapshot.text.replace(/\]\s*\[/g, ',') + ']';
+              // The text may already be wrapped in [], producing '[[{...},{...}]]' — flatten:
+              const outer = JSON.parse(normalised);
+              const flat = Array.isArray(outer) ? outer.flat(Infinity) : [outer];
+              for (const patch of flat) {
+                if (patch && typeof patch === 'object' && 'op' in patch && 'path' in patch) {
+                  parts.push({ type: 'data-spec', data: { type: 'patch', patch } });
+                }
+              }
+            } catch (e) {
+              console.warn('Failed to parse legacy json_render snapshot:', e);
+            }
+          }
+        }
+
+        // Only use parsed parts if we got meaningful output (at least one non-empty part)
+        if (parts.length > 0 && parts.some(p => p.type !== 'text' || (p.text && p.text.trim()))) {
+          uiParts = parts;
+        }
+      } catch (e) {
+        console.warn('Failed to parse mixed stream content for historical message:', e);
+        // Fall through — uiParts stays undefined, content used as-is
+      }
     }
 
     // Extract end and end_reason for error state detection
     const streamEnd = wkMessage.end;
     const streamEndReason = wkMessage.end_reason;
-    
+
     // Extract error message from WuKongIMMessage.error field first, then fallback to payload.error
     // This supports both real-time stream end events and offline API responses
     const errorMessage = (wkMessage.error && typeof wkMessage.error === 'string' && wkMessage.error.trim() !== '')
@@ -537,9 +593,14 @@ export class WuKongIMUtils {
         ? payloadObj.error.trim()
         : undefined;
 
+    // Derive plain-text content for preview when we have mixed ui_parts
+    const displayContent = uiParts
+      ? uiParts.filter(p => p.type === 'text').map(p => p.text || '').join('')
+      : content;
+
     const convertedMessage: Message = {
       id: idStr,
-      content,
+      content: displayContent,
       timestamp: new Date(wkMessage.timestamp * 1000).toISOString(),
       type: senderType === 'agent' ? MESSAGE_SENDER_TYPE.STAFF : (senderType === 'system' ? MESSAGE_SENDER_TYPE.SYSTEM : MESSAGE_SENDER_TYPE.VISITOR),
       status: 'delivered',
@@ -561,6 +622,7 @@ export class WuKongIMUtils {
         stream_end: streamEnd, // Stream end flag (0=not ended, 1=ended)
         stream_end_reason: streamEndReason, // Stream end reason code (>0 indicates error)
         error: errorMessage, // Error message from stream end event or API response
+        ...(uiParts ? { ui_parts: uiParts } : {}),
         ...imageMeta,
         ...fileMeta,
         ...(richImagesMeta ? { images: richImagesMeta } : {}),
@@ -581,15 +643,11 @@ export class WuKongIMUtils {
       return payload.type || 1; // Default to type 1 (text) if not specified
     }
 
-    // Handle legacy string format
+    // Handle string format (JSON or base64-encoded)
     if (typeof payload === 'string') {
-      try {
-        const parsed = JSON.parse(payload);
-        if (parsed && typeof parsed === 'object' && parsed.type !== undefined) {
-          return parsed.type;
-        }
-      } catch {
-        // JSON parsing failed, assume text message
+      const parsed = WuKongIMUtils.tryParsePayloadString(payload);
+      if (parsed && typeof parsed === 'object' && parsed.type !== undefined) {
+        return parsed.type;
       }
     }
 
