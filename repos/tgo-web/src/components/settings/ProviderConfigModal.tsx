@@ -115,8 +115,13 @@ const ProviderConfigModal: React.FC<ProviderConfigModalProps> = ({ isOpen, onClo
         await updateProvider(draft.id, data);
         toast?.showToast('success', t('settings.providers.toast.saved', '已保存修改'));
       } else {
-        await addProvider(data);
-        toast?.showToast('success', t('settings.providers.toast.added', '已添加提供商'));
+        const createdProvider = await addProvider(data);
+        const modelCount = createdProvider.models?.length || 0;
+        if (modelCount > 0) {
+          toast?.showToast('success', t('settings.providers.toast.addedWithDefaults', { count: modelCount }));
+        } else {
+          toast?.showToast('success', t('settings.providers.toast.added', '已添加提供商'));
+        }
       }
       onClose();
     } catch (e: any) {

@@ -36,6 +36,7 @@ from app.schemas.setup import (
     VerifySetupResponse,
 )
 from app.services.ai_client import ai_client
+from app.services.ai_provider_default_models import resolve_initial_model_seeds
 from app.services.wukongim_client import wukongim_client
 from app.utils.const import CHANNEL_TYPE_PROJECT_STAFF
 from app.utils.crypto import encrypt_str
@@ -428,13 +429,14 @@ async def configure_llm(
             detail="System error: No project found"
         )
 
-    # Validate default_model is in available_models if both provided
-    if llm_data.default_model and llm_data.available_models:
-        if llm_data.default_model not in llm_data.available_models:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="default_model must be in available_models list"
-            )
+    initial_model_seeds = resolve_initial_model_seeds(db, llm_data.provider, llm_data.available_models)
+    initial_model_ids = [seed.model_id for seed in initial_model_seeds]
+
+    if llm_data.default_model and llm_data.default_model not in initial_model_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="default_model must be in available_models list"
+        )
 
     # Create AI Provider configuration
     ai_provider = AIProvider(
@@ -443,25 +445,23 @@ async def configure_llm(
         name=llm_data.name,
         api_key=encrypt_str(llm_data.api_key),  # Encrypt API key
         api_base_url=llm_data.api_base_url,
-        default_model=llm_data.default_model,
+        default_model=llm_data.default_model or (initial_model_ids[0] if initial_model_ids else None),
         config=llm_data.config,
         is_active=llm_data.is_active,
     )
 
-    # Sync available_models to AIModel records
+    # Sync initial models (request payload or DB-backed provider defaults) to AIModel records.
     from app.models import AIModel
-    if llm_data.available_models:
-        for mid in llm_data.available_models:
-            model_type = "embedding" if "embedding" in mid.lower() else "chat"
-            m = AIModel(
-                provider_id=ai_provider.id,
-                provider=llm_data.provider,
-                model_id=mid,
-                model_name=mid,
-                model_type=model_type,
-                is_active=True
-            )
-            ai_provider.models.append(m)
+    for seed in initial_model_seeds:
+        m = AIModel(
+            provider_id=ai_provider.id,
+            provider=llm_data.provider,
+            model_id=seed.model_id,
+            model_name=seed.model_name,
+            model_type=seed.model_type,
+            is_active=True
+        )
+        ai_provider.models.append(m)
 
     db.add(ai_provider)
 
@@ -887,4 +887,3 @@ async def batch_create_staff(
         ],
         skipped_usernames=skipped_usernames,
     )
-

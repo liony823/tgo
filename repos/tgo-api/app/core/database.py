@@ -125,6 +125,7 @@ async def init_db() -> None:
             visitor_tag,
             ai_provider,
             ai_model,
+            ai_provider_default_model,
             project_ai_config,
             system_setup,
         )

@@ -620,7 +620,8 @@
         "saved": "已保存修改",
         "deleted": "已删除提供商",
         "modelAdded": "模型已添加",
-        "modelDeleted": "模型已删除"
+        "modelDeleted": "模型已删除",
+        "addedWithDefaults": "已添加提供商，并自动初始化 {{count}} 个常用模型"
       },
       "confirmDeleteModel": "确定要删除模型 {{model}} 吗？",
       "validate": {

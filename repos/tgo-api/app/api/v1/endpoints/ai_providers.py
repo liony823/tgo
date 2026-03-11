@@ -24,6 +24,7 @@ from app.schemas import (
 from app.schemas.remote_model import RemoteModelListResponse, RemoteModelInfo
 from app.utils.crypto import decrypt_str, encrypt_str, mask_secret
 from app.services.ai_provider_sync import sync_provider_with_retry_and_update
+from app.services.ai_provider_default_models import resolve_initial_model_seeds
 from app.services.store_sync import sync_uninstall_models_to_store, sync_uninstall_all_provider_models
 
 logger = get_logger("endpoints.ai_providers")
@@ -313,9 +314,10 @@ async def create_ai_provider(
 ) -> AIProviderResponse:
     """Create a new AI provider configuration for current project."""
 
+    initial_model_seeds = resolve_initial_model_seeds(db, payload.provider, payload.available_models)
+    initial_model_ids = [seed.model_id for seed in initial_model_seeds]
 
-    # Validate default_model within available_models if provided
-    if payload.default_model and payload.available_models and payload.default_model not in payload.available_models:
+    if payload.default_model and payload.default_model not in initial_model_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="default_model must be in available_models")
 
     item = AIProvider(
@@ -324,7 +326,7 @@ async def create_ai_provider(
         name=payload.name,
         api_key=encrypt_str(payload.api_key),
         api_base_url=payload.api_base_url,
-        default_model=payload.default_model,
+        default_model=payload.default_model or (initial_model_ids[0] if initial_model_ids else None),
         config=payload.config,
         is_active=payload.is_active,
     )
@@ -332,18 +334,21 @@ async def create_ai_provider(
     db.add(item)
     db.flush()  # To get item.id
 
-    # Create AIModel records from available_models
-    if payload.available_models:
-        for m_id in payload.available_models:
-            model_record = AIModel(
-                provider_id=item.id,
-                provider=item.provider,
-                model_id=m_id,
-                model_name=m_id,  # Use ID as name if not specified
-                model_type="embedding" if "embedding" in m_id.lower() else "chat",
-                is_active=True
-            )
-            db.add(model_record)
+    # Create AIModel records from payload or DB-backed provider defaults.
+    for seed in initial_model_seeds:
+        model_record = AIModel(
+            provider_id=item.id,
+            provider=item.provider,
+            model_id=seed.model_id,
+            model_name=seed.model_name,
+            model_type=seed.model_type,
+            is_active=True
+        )
+        db.add(model_record)
+
+    # Safety fallback in case caller sends no default but records exist.
+    if not item.default_model and initial_model_ids:
+        item.default_model = initial_model_ids[0]
 
     db.commit()
     db.refresh(item)
@@ -741,4 +746,3 @@ async def test_ai_provider_connection(
     except httpx.RequestError as e:
         logger.warning("AIProvider test request error", extra={"id": str(item.id), "error": str(e)})
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Connection failed: {e}")
-

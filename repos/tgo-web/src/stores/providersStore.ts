@@ -41,7 +41,7 @@ export interface ProvidersState {
   isLoading: boolean;
   error: string | null;
   loadProviders: () => Promise<void>;
-  addProvider: (data: Omit<ModelProviderConfig, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
+  addProvider: (data: Omit<ModelProviderConfig, 'id' | 'createdAt' | 'updatedAt'>) => Promise<ModelProviderConfig>;
   updateProvider: (id: string, patch: Partial<ModelProviderConfig>) => Promise<void>;
   removeProvider: (id: string) => Promise<void>;
   addModelToProvider: (providerId: string, models: Array<{ model_id: string; model_type: 'chat' | 'embedding' }>) => Promise<void>;
@@ -113,7 +113,7 @@ export const useProvidersStore = create<ProvidersState>()(
         const created = await svc.createProvider(payload);
         const cfg = mapDtoToConfig(created);
         set((state) => ({ providers: [...state.providers, cfg] }));
-        return cfg.id;
+        return cfg;
       },
 
       updateProvider: async (id, patch) => {

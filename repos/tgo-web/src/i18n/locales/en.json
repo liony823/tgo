@@ -620,7 +620,8 @@
         "saved": "Changes saved",
         "deleted": "Provider deleted",
         "modelAdded": "Model added",
-        "modelDeleted": "Model deleted"
+        "modelDeleted": "Model deleted",
+        "addedWithDefaults": "Provider added and {{count}} common models were initialized"
       },
       "confirmDeleteModel": "Are you sure you want to delete model {{model}}?",
       "validate": {

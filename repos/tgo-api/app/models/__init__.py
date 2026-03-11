@@ -16,6 +16,7 @@ from app.models.chat_file import ChatFile
 from app.models.visitor_customer_update import VisitorCustomerUpdate
 from app.models.ai_provider import AIProvider
 from app.models.ai_model import AIModel
+from app.models.ai_provider_default_model import AIProviderDefaultModel
 from app.models.project_ai_config import ProjectAIConfig
 from app.models.project_onboarding import ProjectOnboardingProgress
 from app.models.permission import Permission, RolePermission, ProjectRolePermission
@@ -52,6 +53,7 @@ __all__ = [
     "ChatFile",
     "AIProvider",
     "AIModel",
+    "AIProviderDefaultModel",
     "ProjectAIConfig",
     "ProjectOnboardingProgress",
     "SystemSetup",
