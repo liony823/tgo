@@ -33,5 +33,13 @@
 ## Verify
 
 ```bash
+# Static
 poetry run ruff check . && poetry run ruff format --check .
+
+# Functional (requires running server)
+TGO_CLI="node ../tgo-cli/dist/index.js"
+$TGO_CLI platform list                  # platform CRUD
+
+WIDGET_CLI="node ../tgo-widget-cli/dist/index.js"
+$WIDGET_CLI platform info               # visitor-side platform
 ```

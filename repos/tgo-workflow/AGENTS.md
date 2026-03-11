@@ -32,5 +32,11 @@
 ## Verify
 
 ```bash
+# Static
 poetry run pytest
+
+# Functional (requires running server)
+TGO_CLI="node ../tgo-cli/dist/index.js"
+$TGO_CLI workflow list --limit 1        # workflow CRUD
+# $TGO_CLI workflow validate <id>       # workflow validation
 ```

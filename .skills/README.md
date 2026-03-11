@@ -16,6 +16,8 @@ Skills are referenced from `AGENTS.md` using `$skill-name` syntax. AI agents sho
 | `db-migration-check` | After modifying `models/` files | `scripts/check.sh` |
 | `cross-service-sync` | After modifying schemas/types/API interfaces | `scripts/check.sh` |
 | `streaming-protocol-check` | After modifying streaming/SSE/WuKongIM code | `scripts/check.sh` |
+| `functional-verification` | After backend API/service changes (needs running server) | `scripts/verify.sh` |
+| `local-services` | Start/stop/check local dev services | `scripts/start.sh`, `scripts/status.sh`, `scripts/stop.sh` |
 
 ## Running
 

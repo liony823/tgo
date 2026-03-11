@@ -1,3 +1,8 @@
+---
+name: cross-service-sync
+description: Detect schema, type, or API interface changes and find files in other services that may need synchronized updates. Trigger when modifying files under schemas/, types/, or interfaces/ directories — extracts changed class/type names from the diff and searches all other services for references, outputting a list of potentially stale consumers.
+---
+
 # cross-service-sync
 
 ## Purpose

@@ -1,3 +1,8 @@
+---
+name: implementation-strategy
+description: Analyze change impact across services before starting implementation. Trigger before modifying runtime, API, or cross-service code — maps changed files to service ownership, outputs the dependency graph between affected services, and lists upstream/downstream sync points that may need coordinated updates.
+---
+
 # implementation-strategy
 
 ## Purpose

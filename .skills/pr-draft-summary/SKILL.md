@@ -1,3 +1,8 @@
+---
+name: pr-draft-summary
+description: Generate a PR change summary grouped by service after work is finished. Trigger when wrapping up a task and ready to commit or create a pull request — reads git diff and git log, groups changed files by service directory, and outputs a markdown-formatted summary with file lists, commit history, and diff stats.
+---
+
 # pr-draft-summary
 
 ## Purpose

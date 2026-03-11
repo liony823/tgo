@@ -1,3 +1,8 @@
+---
+name: db-migration-check
+description: Verify that SQLAlchemy model changes have corresponding Alembic migration files. Trigger when any file under models/*.py or models/**/*.py is modified — checks git diff for model changes and confirms matching alembic/versions/*.py files exist, failing if a service has model changes without a migration.
+---
+
 # db-migration-check
 
 ## Purpose

@@ -44,5 +44,13 @@ Differences between the two projects (logic must match):
 ## Verify
 
 ```bash
+# Static
 yarn build
+
+# Functional — widget-app calls tgo-api visitor endpoints; use CLI to verify
+WIDGET_CLI="node ../tgo-widget-cli/dist/index.js"
+$WIDGET_CLI platform info               # platform config API
+$WIDGET_CLI channel info                # channel API
+$WIDGET_CLI chat history --limit 3      # message history API
+$WIDGET_CLI chat send --message "say ok" --no-stream  # chat e2e
 ```

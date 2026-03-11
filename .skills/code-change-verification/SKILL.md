@@ -1,3 +1,8 @@
+---
+name: code-change-verification
+description: Run lint, type-check, and build verification for changed services after code modifications are complete. Trigger after any code change to repos/*/ — auto-detects which services were touched via git diff and runs the appropriate static checks (mypy/flake8 for Python, type-check/lint/build for TypeScript, go vet for Go).
+---
+
 # code-change-verification
 
 ## Purpose

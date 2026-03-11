@@ -33,5 +33,11 @@
 ## Verify
 
 ```bash
+# Static
 poetry run mypy src && poetry run flake8 src && poetry run pytest
+
+# Functional (requires running server)
+TGO_CLI="node ../tgo-cli/dist/index.js"
+$TGO_CLI knowledge list --limit 1       # collection CRUD
+# $TGO_CLI knowledge search <id> --query "test"  # search verification
 ```

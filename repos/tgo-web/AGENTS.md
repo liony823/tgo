@@ -34,5 +34,12 @@
 ## Verify
 
 ```bash
+# Static
 yarn type-check && yarn lint && yarn build
+
+# Functional — tgo-web calls tgo-api; use CLI to verify the APIs it depends on
+TGO_CLI="node ../tgo-cli/dist/index.js"
+$TGO_CLI auth whoami                    # auth flow
+$TGO_CLI conversation list --limit 1    # conversation API
+$TGO_CLI agent list --limit 1           # agent API
 ```

@@ -47,5 +47,11 @@
 ## Verify
 
 ```bash
+# Static
 npm run build
+
+# Functional — same visitor APIs as tgo-widget-app
+WIDGET_CLI="node ../tgo-widget-cli/dist/index.js"
+$WIDGET_CLI platform info               # platform config API
+$WIDGET_CLI chat send --message "say ok" --no-stream  # chat e2e
 ```

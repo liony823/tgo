@@ -31,5 +31,15 @@
 ## Verify
 
 ```bash
+# Static
 poetry run mypy app && poetry run flake8 app && poetry run pytest
+
+# Functional (requires running server)
+TGO_CLI="node ../tgo-cli/dist/index.js"
+$TGO_CLI agent list --limit 1           # agent CRUD
+$TGO_CLI provider list                  # provider connectivity
+$TGO_CLI chat team --message "say ok"   # chat e2e (stream)
+
+WIDGET_CLI="node ../tgo-widget-cli/dist/index.js"
+$WIDGET_CLI chat send --message "say ok" --no-stream  # visitor chat e2e
 ```
