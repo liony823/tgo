@@ -13,6 +13,7 @@ from app.api.v1.endpoints import (
     device_control,
     docs,
     email,
+    oidc,
     onboarding,
     platforms,
     plugins,
@@ -281,4 +282,11 @@ api_router.include_router(
     remote_agents.router,
     prefix="/remote-agents",
     tags=["Remote Agents"],
+)
+
+# OIDC SSO endpoints (pharmacy system unified auth integration)
+api_router.include_router(
+    oidc.router,
+    prefix="/oidc",
+    tags=["OIDC"],
 )

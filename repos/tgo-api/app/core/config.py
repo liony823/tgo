@@ -585,6 +585,44 @@ class Settings(BaseSettings):
         """Check if running in production environment."""
         return self.ENVIRONMENT.lower() in ("production", "prod")
 
+    # OIDC / 药房系统统一认证集成
+    OIDC_ENABLED: bool = Field(
+        default=False,
+        description="Enable OIDC authentication from pharmacy system"
+    )
+    OIDC_ISSUER_URL: str = Field(
+        default="",
+        description="Pharmacy system OIDC issuer URL (e.g. https://pharmacy.jizhongtang.cn)"
+    )
+    OIDC_CLIENT_ID: str = Field(
+        default="",
+        description="OAuth2 client_id registered in pharmacy system"
+    )
+    OIDC_CLIENT_SECRET: str = Field(
+        default="",
+        description="OAuth2 client_secret"
+    )
+    OIDC_REDIRECT_URI: str = Field(
+        default="",
+        description="OAuth2 redirect_uri for this TGO instance"
+    )
+    OIDC_JWKS_URL: str = Field(
+        default="",
+        description="JWKS endpoint URL (auto-derived from issuer if empty)"
+    )
+    OIDC_SCOPES: str = Field(
+        default="openid profile email phone im",
+        description="Space-separated OIDC scopes to request"
+    )
+    OIDC_DEFAULT_PROJECT_ID: Optional[str] = Field(
+        default=None,
+        description="Default project_id for OIDC-authenticated users"
+    )
+    OIDC_STAFF_ROLE_MAPPING: str = Field(
+        default='{"super_admin":"admin","platform_admin":"admin","doctor":"user","pharmacist":"user","merchant_admin":"user","patient":"user"}',
+        description="JSON mapping from pharmacy role to TGO staff role"
+    )
+
     @property
     def database_url_sync(self) -> str:
         """Get synchronous database URL (force psycopg2 driver)."""
