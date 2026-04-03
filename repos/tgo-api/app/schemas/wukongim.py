@@ -1,10 +1,15 @@
 """WuKongIM integration schemas."""
 
+import base64
+import json
+import logging
 from typing import Any, Dict, List, Optional
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, field_validator
 
 from app.schemas.base import BaseSchema
+
+_logger = logging.getLogger("schemas.wukongim")
 
 
 class WuKongIMUserRegistration(BaseSchema):
@@ -101,6 +106,25 @@ class WuKongIMMessage(BaseSchema):
     end_reason: Optional[int] = Field(None, description="Stream end reason code")
     error: Optional[str] = Field(None, description="Error message")
     event_meta: Optional[Dict[str, Any]] = Field(None, description="Stream event metadata (snapshots, status)")
+
+    @field_validator("payload", mode="before")
+    @classmethod
+    def _decode_base64_payload(cls, v: Any) -> Dict[str, Any]:
+        """Auto-decode base64-encoded payload strings from WuKongIM."""
+        if isinstance(v, dict):
+            return v
+        if isinstance(v, str):
+            _logger.info(f"[validator] payload is str (len={len(v)}), auto-decoding base64: {v[:80]}")
+            try:
+                decoded = base64.b64decode(v).decode("utf-8")
+                result = json.loads(decoded)
+                _logger.info(f"[validator] decoded payload OK: {result}")
+                return result
+            except Exception as e:
+                _logger.warning(f"[validator] base64 decode failed: {e}, raw={v[:80]}")
+                return {"raw_payload": v, "decode_error": "base64_decode_failed"}
+        _logger.warning(f"[validator] payload unexpected type={type(v).__name__}")
+        return {"raw_payload": str(v), "decode_error": "unexpected_type"}
 
     @computed_field  # type: ignore[misc]
     @property

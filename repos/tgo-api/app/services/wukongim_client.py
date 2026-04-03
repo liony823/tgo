@@ -118,7 +118,11 @@ class WuKongIMClient:
                 if response.status_code == 200:
                     # Some endpoints return empty response body on success
                     try:
-                        return response.json() if response.text else {}
+                        parsed = response.json() if response.text else {}
+                        if endpoint in ("/channel/messagesync", "/conversation/sync"):
+                            body_preview = response.text[:500] if response.text else "(empty)"
+                            logger.info(f"[WuKongIM] {endpoint} raw body preview: {body_preview}")
+                        return parsed
                     except Exception:
                         return {}
                 else:
@@ -1516,21 +1520,28 @@ class WuKongIMClient:
                 json_data=request_data,
             )
 
+            logger.info(
+                f"[conversation/sync] raw response type={type(result).__name__}, "
+                f"is_list={isinstance(result, list)}, "
+                f"len={len(result) if isinstance(result, list) else 'N/A'}, "
+                f"keys={list(result.keys()) if isinstance(result, dict) else 'N/A'}"
+            )
+
             conversations = result if isinstance(result, list) else []
 
             # Decode base64 payloads in recent messages
-            for conversation in conversations:
+            for conv_idx, conversation in enumerate(conversations):
                 if "recents" in conversation and isinstance(conversation["recents"], list):
-                    for message in conversation["recents"]:
-                        if "payload" in message and isinstance(message["payload"], str):
-                            # Decode the base64 payload to JSON
-                            message["payload"] = self._decode_message_payload(message["payload"])
-
-                        # Remove stream_data from response — replaced by event_meta
+                    for msg_idx, message in enumerate(conversation["recents"]):
+                        payload_val = message.get("payload")
+                        if isinstance(payload_val, str):
+                            logger.debug(f"[conversation/sync] conv[{conv_idx}].recents[{msg_idx}] payload is str, decoding")
+                            message["payload"] = self._decode_message_payload(payload_val)
+                        elif not isinstance(payload_val, dict):
+                            logger.warning(f"[conversation/sync] conv[{conv_idx}].recents[{msg_idx}] payload unexpected type={type(payload_val).__name__}")
                         message.pop("stream_data", None)
 
             logger.info(f"Successfully synced {len(conversations)} conversations for user {uid}")
-            # Convert to WuKongIMConversation objects
             return [WuKongIMConversation(**conv) for conv in conversations]
 
         except Exception as e:
@@ -1779,20 +1790,39 @@ class WuKongIMClient:
         )
 
         try:
-            result = await self._make_request(
+            raw = await self._make_request(
                 method="POST",
                 endpoint="/channel/messagesync",
                 json_data=request_data,
             )
 
-            # Decode base64 payloads in messages
-            if "messages" in result and isinstance(result["messages"], list):
-                for message in result["messages"]:
-                    # Decode the base64 payload to JSON
-                    if "payload" in message and isinstance(message["payload"], str):
-                        message["payload"] = self._decode_message_payload(message["payload"])
+            logger.info(
+                f"[messagesync] raw response keys={list(raw.keys()) if isinstance(raw, dict) else type(raw).__name__}, "
+                f"has 'data'={'data' in raw if isinstance(raw, dict) else False}, "
+                f"has 'messages'={'messages' in raw if isinstance(raw, dict) else False}"
+            )
 
-                    # Remove stream_data from response — replaced by event_meta
+            # WuKongIM may wrap the payload in {"data": {...}, "status": 200}
+            result = raw.get("data", raw) if isinstance(raw.get("data"), dict) else raw
+
+            has_messages = "messages" in result and isinstance(result["messages"], list)
+            msg_count_raw = len(result["messages"]) if has_messages else 0
+            logger.info(
+                f"[messagesync] after unwrap: keys={list(result.keys()) if isinstance(result, dict) else type(result).__name__}, "
+                f"has_messages_list={has_messages}, count={msg_count_raw}"
+            )
+
+            if has_messages:
+                for i, message in enumerate(result["messages"]):
+                    payload_val = message.get("payload")
+                    payload_type = type(payload_val).__name__
+                    if isinstance(payload_val, str):
+                        logger.debug(f"[messagesync] msg[{i}] payload is str (len={len(payload_val)}), decoding base64")
+                        message["payload"] = self._decode_message_payload(payload_val)
+                    elif isinstance(payload_val, dict):
+                        logger.debug(f"[messagesync] msg[{i}] payload already dict")
+                    else:
+                        logger.warning(f"[messagesync] msg[{i}] payload unexpected type={payload_type}, value={repr(payload_val)[:200]}")
                     message.pop("stream_data", None)
 
             message_count = len(result.get("messages", []))
