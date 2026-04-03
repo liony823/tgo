@@ -52,6 +52,20 @@ class VisitorSession(Base):
         comment="Platform where this session originated",
     )
 
+    # WuKongIM channel for this session (used by consultation / online-diagnosis flows)
+    channel_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="WuKongIM channel ID bound to this session",
+    )
+    channel_type: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=251,
+        server_default="251",
+        comment="WuKongIM channel type (251=customer service)",
+    )
+
     # Session status
     status: Mapped[str] = mapped_column(
         String(20),

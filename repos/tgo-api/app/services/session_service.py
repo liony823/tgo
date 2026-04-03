@@ -57,7 +57,8 @@ async def close_visitor_session(
     )
     
     # 1. Get channel last message from WuKongIM
-    channel_id = build_visitor_channel_id(session.visitor_id)
+    # Use the session's own channel_id (cs-{uuid} for consultations), fall back to legacy format
+    channel_id = session.channel_id or build_visitor_channel_id(session.visitor_id)
     try:
         last_message = await wukongim_client.get_channel_last_message(
             channel_id=channel_id,

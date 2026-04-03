@@ -587,23 +587,23 @@ class Settings(BaseSettings):
 
     # OIDC / 药房系统统一认证集成
     OIDC_ENABLED: bool = Field(
-        default=False,
+        default=True,
         description="Enable OIDC authentication from pharmacy system"
     )
     OIDC_ISSUER_URL: str = Field(
-        default="",
-        description="Pharmacy system OIDC issuer URL (e.g. https://pharmacy.jizhongtang.cn)"
+        default="http://192.168.1.75:8888",
+        description="Pharmacy system OIDC issuer URL (e.g. https://yiyangtiannian.jizhongtang.com.cn)"
     )
     OIDC_CLIENT_ID: str = Field(
-        default="",
+        default="tgo-im",
         description="OAuth2 client_id registered in pharmacy system"
     )
     OIDC_CLIENT_SECRET: str = Field(
-        default="",
+        default="wpW426syL08FxYJD6Dt7ClwK/oJaEP5W",
         description="OAuth2 client_secret"
     )
     OIDC_REDIRECT_URI: str = Field(
-        default="",
+        default="http://192.168.1.75/api/v1/oidc/callback",
         description="OAuth2 redirect_uri for this TGO instance"
     )
     OIDC_JWKS_URL: str = Field(
@@ -615,7 +615,7 @@ class Settings(BaseSettings):
         description="Space-separated OIDC scopes to request"
     )
     OIDC_DEFAULT_PROJECT_ID: Optional[str] = Field(
-        default=None,
+        default="tgo-im",
         description="Default project_id for OIDC-authenticated users"
     )
     OIDC_STAFF_ROLE_MAPPING: str = Field(

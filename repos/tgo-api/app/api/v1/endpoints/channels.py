@@ -26,7 +26,7 @@ from app.schemas.tag import set_tag_list_display_name
 from app.services.ai_client import ai_client
 
 from app.utils.const import CHANNEL_TYPE_CUSTOMER_SERVICE
-from app.utils.encoding import parse_visitor_channel_id
+from app.services.visitor_service import resolve_visitor_id_from_channel
 from app.utils.intent import localize_visitor_response_intent
 
 
@@ -102,6 +102,7 @@ def _build_enriched_visitor_payload(
     project_id: UUID,
     accept_language: Optional[str] = None,
     user_language: UserLanguage = "en",
+    channel_id: Optional[str] = None,
 ) -> VisitorResponse:
     """Build enriched visitor payload with tags, AI profile/insights, system info, and activities."""
     active_tags = [
@@ -137,17 +138,26 @@ def _build_enriched_visitor_payload(
         VisitorActivityResponse.model_validate(activity) for activity in recent_activities
     ]
 
-    # Query the open session to get assigned staff_id
-    open_session = (
+    # Query the open session to get assigned staff_id.
+    # When channel_id is provided, prefer the session bound to that specific channel
+    # so that multi-consultation visitors show the correct staff per channel.
+    session_query = (
         db.query(VisitorSession)
         .filter(
             VisitorSession.visitor_id == visitor.id,
             VisitorSession.project_id == project_id,
             VisitorSession.status == SessionStatus.OPEN.value,
         )
-        .order_by(VisitorSession.created_at.desc())
-        .first()
     )
+    open_session = None
+    if channel_id:
+        open_session = session_query.filter(
+            VisitorSession.channel_id == channel_id
+        ).first()
+    if not open_session:
+        open_session = session_query.order_by(
+            VisitorSession.created_at.desc()
+        ).first()
     assigned_staff_id = open_session.staff_id if open_session else None
 
     visitor_payload = VisitorResponse.model_validate(visitor).model_copy(
@@ -559,16 +569,15 @@ async def _get_customer_service_channel_info(
     user_language: UserLanguage = "en",
 ) -> ChannelInfoResponse:
     """Get channel info for customer service channel (type 251)."""
-    try:
-        visitor_uuid = parse_visitor_channel_id(channel_id)
-    except ValueError:
+    visitor_uuid = resolve_visitor_id_from_channel(db, channel_id)
+    if not visitor_uuid:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid channel_id format")
 
     visitor = _get_visitor_with_relations(db, visitor_uuid, project_id)
     if not visitor:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Visitor not found")
 
-    visitor_payload = _build_enriched_visitor_payload(visitor, db, project_id, accept_language, user_language)
+    visitor_payload = _build_enriched_visitor_payload(visitor, db, project_id, accept_language, user_language, channel_id=channel_id)
     set_visitor_display_nickname(visitor_payload, user_language)
     return _build_visitor_channel_response(visitor, visitor_payload, channel_id, channel_type, user_language)
 
@@ -699,6 +708,6 @@ def _get_personal_visitor_channel_info(
     if not visitor:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Visitor not found")
 
-    visitor_payload = _build_enriched_visitor_payload(visitor, db, project_id, accept_language, user_language)
+    visitor_payload = _build_enriched_visitor_payload(visitor, db, project_id, accept_language, user_language, channel_id=channel_id)
     set_visitor_display_nickname(visitor_payload, user_language)
     return _build_visitor_channel_response(visitor, visitor_payload, channel_id, channel_type, user_language)

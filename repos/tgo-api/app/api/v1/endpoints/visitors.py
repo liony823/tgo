@@ -26,14 +26,12 @@ from app.core.security import verify_token
 from app.services.wukongim_client import wukongim_client
 from app.services.visitor_notifications import notify_visitor_profile_updated
 from app.utils.intent import localize_visitor_response_intent
-from app.utils.const import CHANNEL_TYPE_CUSTOMER_SERVICE, MEMBER_TYPE_VISITOR
+from app.utils.const import CHANNEL_TYPE_CUSTOMER_SERVICE, MEMBER_TYPE_VISITOR, MEMBER_TYPE_STAFF
 from app.utils.request import get_client_ip, get_client_language
 from app.services.geoip_service import geoip_service
 import app.services.visitor_service as visitor_service
-from app.utils.encoding import (
-    build_visitor_channel_id,
-    parse_visitor_channel_id,
-)
+from app.utils.encoding import build_visitor_channel_id
+from app.services.visitor_service import resolve_visitor_id_from_channel
 
 
 from app.core.database import get_db
@@ -48,6 +46,8 @@ from app.models import (
     VisitorSystemInfo,
     VisitorTag,
     ChannelMember,
+    VisitorSession,
+    SessionStatus,
     VisitorWaitingQueue,
     WaitingStatus,
     AssignmentSource,
@@ -73,6 +73,10 @@ from app.schemas import (
     VisitorRegisterRequest,
     VisitorRegisterResponse,
     VisitorMessageSyncRequest,
+    ConsultationCreateRequest,
+    ConsultationCreateResponse,
+    ConsultationSessionInfo,
+    ConsultationListResponse,
 )
 from app.schemas.visitor import (
     set_visitor_display_nickname,
@@ -398,8 +402,6 @@ async def register_visitor(
         real_ip = get_client_ip(request, req.ip_address)
         real_language = get_client_language(request, req.language)
 
-        # Use visitor_service.create_visitor_with_channel for complete setup
-        # If normalized_open_id is None, visitor.id will be used as platform_open_id
         visitor = await visitor_service.create_visitor_with_channel(
             db=db,
             platform=platform,
@@ -418,6 +420,7 @@ async def register_visitor(
             timezone=req.timezone,
             language=real_language,
             ip_address=real_ip,
+            skip_channel=req.skip_channel,
         )
         profile_changed = True
     else:
@@ -472,11 +475,10 @@ async def register_visitor(
         db.refresh(visitor)
         profile_changed = True
 
-    # 3) Ensure WuKongIM channel exists
-    # For new visitors, channel was already created by visitor_service.create_visitor_with_channel or visitor_service.ensure_visitor_channel
-    # For existing visitors, we need to ensure channel exists
-    if not is_new_visitor:
-        await visitor_service.ensure_visitor_channel(db, visitor, platform)
+    # 3) Ensure WuKongIM channel exists (skip when using consultation flow)
+    if not req.skip_channel:
+        if not is_new_visitor:
+            await visitor_service.ensure_visitor_channel(db, visitor, platform)
 
     if profile_changed:
         await notify_visitor_profile_updated(db, visitor)
@@ -498,20 +500,282 @@ async def register_visitor(
             extra={"uid": str(visitor.id)},
         )
 
-    # 4) Build response with additional fields
-    channel_id = build_visitor_channel_id(visitor.id)
+    # 4) If target_staff_id provided (and not in skip_channel mode), assign immediately
+    assigned_staff_id = None
+    if req.target_staff_id and not req.skip_channel:
+        try:
+            transfer_result = await transfer_to_staff(
+                db=db,
+                visitor_id=visitor.id,
+                project_id=platform.project_id,
+                source=AssignmentSource.MANUAL,
+                target_staff_id=req.target_staff_id,
+                platform_id=platform.id,
+                ai_disabled=True,
+                add_to_queue_if_no_staff=False,
+            )
+            if transfer_result.success and transfer_result.assigned_staff_id:
+                assigned_staff_id = transfer_result.assigned_staff_id
+                logger.info(f"Direct assignment: visitor {visitor.id} -> staff {assigned_staff_id}")
+            else:
+                logger.warning(f"Direct assignment failed for visitor {visitor.id}: {transfer_result.message}")
+        except Exception as e:
+            logger.error(f"Failed to assign staff {req.target_staff_id} to visitor {visitor.id}: {e}")
+
+    # 5) Build response with additional fields
+    channel_id = build_visitor_channel_id(visitor.id) if not req.skip_channel else None
+    channel_type = CHANNEL_TYPE_CUSTOMER_SERVICE if not req.skip_channel else None
     visitor_response = VisitorResponse.model_validate(visitor)
     populate_visitor_ai_settings(visitor_response, visitor.platform)
     base_payload = visitor_response.model_dump()
     resp = VisitorRegisterResponse.model_validate({
         **base_payload,
         "channel_id": channel_id,
-        "channel_type": CHANNEL_TYPE_CUSTOMER_SERVICE,
+        "channel_type": channel_type,
         "im_token": im_token,
+        "assigned_staff_id": assigned_staff_id,
     })
     localize_visitor_response_intent(resp, request.headers.get("Accept-Language"))
     set_visitor_display_nickname(resp, user_language)
     return resp
+
+
+# ---------------------------------------------------------------------------
+# Consultation (online-diagnosis) endpoints
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/consultations",
+    response_model=ConsultationCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a 1-on-1 consultation session",
+    description=(
+        "Create an isolated consultation channel between a visitor (patient) "
+        "and a staff member (doctor). If an OPEN session already exists for "
+        "the same visitor+staff pair, the existing session is returned (idempotent)."
+    ),
+)
+async def create_consultation(
+    req: ConsultationCreateRequest,
+    db: Session = Depends(get_db),
+) -> ConsultationCreateResponse:
+    """Visitor-facing: create or retrieve a consultation session."""
+
+    # 1) Authenticate via platform_api_key
+    platform = (
+        db.query(Platform)
+        .filter(
+            Platform.api_key == req.platform_api_key,
+            Platform.is_active == True,
+            Platform.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not platform:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid platform API key")
+
+    # 2) Validate visitor
+    visitor = (
+        db.query(Visitor)
+        .filter(
+            Visitor.id == req.visitor_id,
+            Visitor.project_id == platform.project_id,
+            Visitor.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not visitor:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Visitor not found")
+
+    # 3) Validate staff (doctor)
+    staff = (
+        db.query(Staff)
+        .filter(
+            Staff.id == req.staff_id,
+            Staff.project_id == platform.project_id,
+            Staff.is_active == True,
+            Staff.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not staff:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+
+    # 4) Idempotent: return existing OPEN session for same visitor+staff
+    existing_session = (
+        db.query(VisitorSession)
+        .filter(
+            VisitorSession.visitor_id == req.visitor_id,
+            VisitorSession.staff_id == req.staff_id,
+            VisitorSession.project_id == platform.project_id,
+            VisitorSession.status == SessionStatus.OPEN.value,
+            VisitorSession.channel_id.isnot(None),
+        )
+        .order_by(VisitorSession.created_at.desc())
+        .first()
+    )
+    if existing_session:
+        return ConsultationCreateResponse(
+            session_id=existing_session.id,
+            channel_id=existing_session.channel_id,
+            channel_type=existing_session.channel_type,
+            staff_id=staff.id,
+            staff_name=staff.nickname or staff.username,
+            staff_avatar=staff.avatar_url if hasattr(staff, "avatar_url") else None,
+            status=existing_session.status,
+            created_at=existing_session.created_at,
+        )
+
+    # 5) Create new session with dedicated channel
+    session = VisitorSession(
+        project_id=platform.project_id,
+        visitor_id=req.visitor_id,
+        staff_id=req.staff_id,
+        platform_id=platform.id,
+        status=SessionStatus.OPEN.value,
+        channel_id=f"cs-{uuid.uuid4()}",
+        channel_type=CHANNEL_TYPE_CUSTOMER_SERVICE,
+    )
+    db.add(session)
+    db.flush()
+
+    # 6) Record channel members (visitor + staff)
+    visitor_uid = f"{visitor.id}-vtr"
+    staff_uid = f"{staff.id}-staff"
+
+    for member_id, member_type in [
+        (visitor.id, MEMBER_TYPE_VISITOR),
+        (staff.id, MEMBER_TYPE_STAFF),
+    ]:
+        db.add(ChannelMember(
+            project_id=platform.project_id,
+            channel_id=session.channel_id,
+            channel_type=session.channel_type,
+            member_id=member_id,
+            member_type=member_type,
+        ))
+
+    # 6b) Set visitor service_status to ACTIVE (consistent with transfer_to_staff)
+    visitor.set_status_active()
+
+    # 6c) Disable AI for consultation (visitor chose a specific doctor)
+    visitor.ai_disabled = True
+
+    db.commit()
+    db.refresh(session)
+
+    # 7) Create WuKongIM channel with both subscriber UIDs
+    try:
+        await wukongim_client.create_channel(
+            channel_id=session.channel_id,
+            channel_type=session.channel_type,
+            subscribers=[visitor_uid, staff_uid],
+        )
+        logger.info(
+            "Consultation channel created",
+            extra={
+                "session_id": str(session.id),
+                "channel_id": session.channel_id,
+                "visitor_id": str(visitor.id),
+                "staff_id": str(staff.id),
+            },
+        )
+    except Exception as e:
+        logger.error(f"Failed to create WuKongIM channel for consultation: {e}")
+
+    return ConsultationCreateResponse(
+        session_id=session.id,
+        channel_id=session.channel_id,
+        channel_type=session.channel_type,
+        staff_id=staff.id,
+        staff_name=staff.nickname or staff.username,
+        staff_avatar=staff.avatar_url if hasattr(staff, "avatar_url") else None,
+        status=session.status,
+        created_at=session.created_at,
+    )
+
+
+@router.get(
+    "/consultations",
+    response_model=ConsultationListResponse,
+    summary="List consultation sessions for a visitor",
+    description=(
+        "Return all consultation sessions (with their channel info and doctor "
+        "details) for a given visitor. Authenticate via platform API key."
+    ),
+)
+async def list_consultations(
+    platform_api_key: str = Query(..., description="Platform API key"),
+    visitor_id: UUID = Query(..., description="Visitor ID"),
+    include_closed: bool = Query(False, description="Include closed sessions"),
+    db: Session = Depends(get_db),
+) -> ConsultationListResponse:
+    """Visitor-facing: list consultation sessions."""
+
+    # 1) Authenticate
+    platform = (
+        db.query(Platform)
+        .filter(
+            Platform.api_key == platform_api_key,
+            Platform.is_active == True,
+            Platform.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not platform:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid platform API key")
+
+    # 2) Validate visitor
+    visitor = (
+        db.query(Visitor)
+        .filter(
+            Visitor.id == visitor_id,
+            Visitor.project_id == platform.project_id,
+            Visitor.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not visitor:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Visitor not found")
+
+    # 3) Query sessions that have a consultation channel_id
+    q = (
+        db.query(VisitorSession)
+        .filter(
+            VisitorSession.visitor_id == visitor_id,
+            VisitorSession.project_id == platform.project_id,
+            VisitorSession.channel_id.isnot(None),
+        )
+    )
+    if not include_closed:
+        q = q.filter(VisitorSession.status == SessionStatus.OPEN.value)
+
+    sessions = q.order_by(VisitorSession.created_at.desc()).all()
+
+    # 4) Batch-fetch staff info
+    staff_ids = list({s.staff_id for s in sessions if s.staff_id})
+    staff_map: dict[UUID, Staff] = {}
+    if staff_ids:
+        staff_rows = db.query(Staff).filter(Staff.id.in_(staff_ids)).all()
+        staff_map = {s.id: s for s in staff_rows}
+
+    items: list[ConsultationSessionInfo] = []
+    for s in sessions:
+        st = staff_map.get(s.staff_id) if s.staff_id else None
+        items.append(ConsultationSessionInfo(
+            session_id=s.id,
+            channel_id=s.channel_id,
+            channel_type=s.channel_type,
+            staff_id=s.staff_id,
+            staff_name=(st.nickname or st.username) if st else None,
+            staff_avatar=(st.avatar_url if hasattr(st, "avatar_url") else None) if st else None,
+            status=s.status,
+            last_message_at=s.last_message_at,
+            message_count=s.message_count,
+            created_at=s.created_at,
+        ))
+
+    return ConsultationListResponse(data=items)
 
 
 @router.post(
@@ -800,9 +1064,8 @@ async def get_visitor_by_channel(
     """
     # Resolve visitor_id from channel info
     if channel_type == CHANNEL_TYPE_CUSTOMER_SERVICE:
-        try:
-            visitor_uuid = parse_visitor_channel_id(channel_id)
-        except ValueError:
+        visitor_uuid = resolve_visitor_id_from_channel(db, channel_id)
+        if not visitor_uuid:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid visitor channel_id format")
     elif channel_type == 1:
         try:
@@ -1345,9 +1608,8 @@ async def sync_visitor_channel_messages(
     login_uid: Optional[str] = None
 
     if req.channel_type == CHANNEL_TYPE_CUSTOMER_SERVICE:
-        try:
-            visitor_uuid = parse_visitor_channel_id(req.channel_id)
-        except ValueError:
+        visitor_uuid = resolve_visitor_id_from_channel(db, req.channel_id)
+        if not visitor_uuid:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid channel_id format")
 
         visitor = (
@@ -1360,7 +1622,7 @@ async def sync_visitor_channel_messages(
         if visitor.platform_id != platform.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access to this channel is forbidden for this platform")
 
-        login_uid = str(visitor.id)
+        login_uid = f"{visitor.id}-vtr"
 
     elif req.channel_type == 1:
         # Personal channel: channel_id should be a visitor UUID (not a staff UID)
@@ -1381,7 +1643,7 @@ async def sync_visitor_channel_messages(
         if visitor.platform_id != platform.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access to this visitor is forbidden for this platform")
 
-        login_uid = str(visitor.id)
+        login_uid = f"{visitor.id}-vtr"
 
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported channel_type")

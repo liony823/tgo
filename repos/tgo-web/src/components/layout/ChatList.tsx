@@ -230,6 +230,15 @@ const ChatListComponent: React.FC<ChatListProps> = ({
         const chats = response.conversations.map(conv => convertWuKongIMToChat(conv));
         setMyChats(sortChatsByTimestamp(chats));
         console.log(`📋 ChatList: Loaded "mine" tab, ${chats.length} conversations`);
+
+        // Sync API results into the global chatStore so that ChatPage's
+        // URL-based conversation lookup can find them after a page refresh.
+        const globalChats = useChatStore.getState().chats;
+        const existingKeys = new Set(globalChats.map(c => getChannelKey(c.channelId, c.channelType)));
+        const newGlobalChats = chats.filter(c => !existingKeys.has(getChannelKey(c.channelId, c.channelType)));
+        if (newGlobalChats.length > 0) {
+          useChatStore.getState().setChats([...globalChats, ...newGlobalChats]);
+        }
         
         // 缓存频道信息，避免后续单独请求
         if (response.channels && response.channels.length > 0) {
@@ -903,11 +912,14 @@ const ChatListComponent: React.FC<ChatListProps> = ({
         showToast('warning', t('search.toasts.incompleteVisitorInfo', '访客信息不完整'), t('search.toasts.missingVisitorId', '缺少 visitor_id'));
         return;
       }
-      const channelId = `${visitorId}-vtr`;
-      const channelType = 251; // 访客会话类型
+      const channelType = 251;
 
-      // 1) 已存在则直接切换
-      const exist = realtimeChats.find(c => c.channelId === channelId && c.channelType === channelType);
+      // 1) 已存在则直接切换（支持 -vtr 和 cs- 两种频道格式）
+      const exist = realtimeChats.find(c =>
+        c.channelType === channelType &&
+        (c.channelId === `${visitorId}-vtr` || (c.channelInfo?.extra as any)?.id === visitorId)
+      );
+      const channelId = exist?.channelId ?? `${visitorId}-vtr`;
       if (exist) {
         onChatSelect(exist);
         return;
@@ -1274,7 +1286,7 @@ const ChatListComponent: React.FC<ChatListProps> = ({
                 <OnlineVisitorListItem
                   key={visitor.id}
                   visitor={visitor}
-                  isActive={activeChat?.channelId === `${visitor.id}-vtr`}
+                  isActive={activeChat?.channelId === `${visitor.id}-vtr` || (activeChat?.channelInfo?.extra as any)?.id === visitor.id}
                   onClick={handleOnlineVisitorClick}
                 />
               ))}

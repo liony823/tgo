@@ -62,7 +62,8 @@ from app.models import AssignmentSource
 from app.services.ai_client import AIServiceClient
 from app.services.wukongim_client import wukongim_client
 from app.utils.const import CHANNEL_TYPE_CUSTOMER_SERVICE, MEMBER_TYPE_STAFF, MessageType
-from app.utils.encoding import build_visitor_channel_id, parse_visitor_channel_id, get_session_id
+from app.utils.encoding import build_visitor_channel_id, get_session_id
+from app.services.visitor_service import resolve_visitor_id_from_channel
 
 
 router = APIRouter()
@@ -379,11 +380,14 @@ async def chat_completion(req: ChatCompletionRequest, db: Session = Depends(get_
         wukongim_from_uid = f"{assigned_staff_id}-staff"
     else:
         # Check if visitor has an open session with assigned staff
-        open_session = db.query(VisitorSession).filter(
+        session_query = db.query(VisitorSession).filter(
             VisitorSession.visitor_id == visitor.id,
             VisitorSession.status == SessionStatus.OPEN.value,
             VisitorSession.staff_id.isnot(None),
-        ).first()
+        )
+        if channel_id_enc:
+            session_query = session_query.filter(VisitorSession.channel_id == channel_id_enc)
+        open_session = session_query.first()
         
         if open_session and open_session.staff_id:
             wukongim_from_uid = f"{open_session.staff_id}-staff"
@@ -549,9 +553,8 @@ async def staff_send_platform_message(
             detail="Only customer service channels (type 251) are supported",
         )
 
-    try:
-        visitor_uuid = parse_visitor_channel_id(req.channel_id)
-    except ValueError:
+    visitor_uuid = resolve_visitor_id_from_channel(db, req.channel_id)
+    if not visitor_uuid:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid channel_id format")
 
     membership = (
@@ -666,9 +669,8 @@ async def chat_file_upload(
 
     # 2) Access validation by channel
     if channel_type == CHANNEL_TYPE_CUSTOMER_SERVICE:
-        try:
-            visitor_uuid = parse_visitor_channel_id(channel_id)
-        except ValueError:
+        visitor_uuid = resolve_visitor_id_from_channel(db, channel_id)
+        if not visitor_uuid:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid channel_id format")
 
         visitor = (
@@ -823,9 +825,8 @@ async def get_chat_file(
 
     if platform and not current_user:
         if chat_file.channel_type == CHANNEL_TYPE_CUSTOMER_SERVICE:
-            try:
-                visitor_uuid = parse_visitor_channel_id(chat_file.channel_id)
-            except ValueError:
+            visitor_uuid = resolve_visitor_id_from_channel(db, chat_file.channel_id)
+            if not visitor_uuid:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file channel encoding")
             visitor = (
                 db.query(Visitor)
@@ -978,11 +979,14 @@ async def chat_completion_openai_compatible(
         wukongim_from_uid = f"{assigned_staff_id}-staff"
     else:
         # Check if visitor has an open session with assigned staff
-        open_session = db.query(VisitorSession).filter(
+        session_query = db.query(VisitorSession).filter(
             VisitorSession.visitor_id == visitor.id,
             VisitorSession.status == SessionStatus.OPEN.value,
             VisitorSession.staff_id.isnot(None),
-        ).first()
+        )
+        if channel_id_enc:
+            session_query = session_query.filter(VisitorSession.channel_id == channel_id_enc)
+        open_session = session_query.first()
         
         if open_session and open_session.staff_id:
             wukongim_from_uid = f"{open_session.staff_id}-staff"

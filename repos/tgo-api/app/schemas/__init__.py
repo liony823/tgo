@@ -171,6 +171,10 @@ from app.schemas.visitor_session import (
     VisitorSessionResponse,
     VisitorSessionDetailResponse,
     VisitorSessionListParams,
+    ConsultationCreateRequest,
+    ConsultationCreateResponse,
+    ConsultationSessionInfo,
+    ConsultationListResponse,
 )
 from app.schemas.visitor_waiting_queue import (
     WaitingStatusEnum,
@@ -345,6 +349,11 @@ __all__ = [
     "VisitorSessionResponse",
     "VisitorSessionDetailResponse",
     "VisitorSessionListParams",
+    # Consultation schemas
+    "ConsultationCreateRequest",
+    "ConsultationCreateResponse",
+    "ConsultationSessionInfo",
+    "ConsultationListResponse",
     # Visitor Waiting Queue schemas
     "WaitingStatusEnum",
     "QueueSourceEnum",

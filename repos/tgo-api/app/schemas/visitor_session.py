@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from pydantic import Field
@@ -49,6 +49,8 @@ class VisitorSessionResponse(BaseSchema):
     visitor_id: UUID = Field(..., description="Visitor ID")
     staff_id: Optional[UUID] = Field(None, description="Staff member ID")
     platform_id: Optional[UUID] = Field(None, description="Platform ID")
+    channel_id: Optional[str] = Field(None, description="WuKongIM channel ID for this session")
+    channel_type: int = Field(default=251, description="WuKongIM channel type")
     status: str = Field(..., description="Session status")
     closed_at: Optional[datetime] = Field(None, description="When session was closed")
     duration_seconds: Optional[int] = Field(None, description="Session duration in seconds")
@@ -79,3 +81,49 @@ class VisitorSessionListParams(BaseSchema):
     status: Optional[SessionStatus] = Field(None, description="Filter by status")
     limit: int = Field(default=20, ge=1, le=100, description="Page size")
     offset: int = Field(default=0, ge=0, description="Page offset")
+
+
+# ---------------------------------------------------------------------------
+# Consultation (online-diagnosis) schemas
+# ---------------------------------------------------------------------------
+
+class ConsultationCreateRequest(BaseSchema):
+    """Request to create a 1-on-1 consultation session between visitor and staff."""
+
+    platform_api_key: str = Field(..., description="Platform API key for authentication")
+    visitor_id: UUID = Field(..., description="Visitor (patient) ID")
+    staff_id: UUID = Field(..., description="Staff (doctor) ID")
+
+
+class ConsultationCreateResponse(BaseSchema):
+    """Response after creating a consultation session."""
+
+    session_id: UUID = Field(..., description="Created session ID")
+    channel_id: str = Field(..., description="WuKongIM channel ID for this consultation")
+    channel_type: int = Field(default=251, description="WuKongIM channel type")
+    staff_id: UUID = Field(..., description="Assigned staff (doctor) ID")
+    staff_name: Optional[str] = Field(None, description="Staff display name")
+    staff_avatar: Optional[str] = Field(None, description="Staff avatar URL")
+    status: str = Field(default="open", description="Session status")
+    created_at: datetime = Field(..., description="Session creation timestamp")
+
+
+class ConsultationSessionInfo(BaseSchema):
+    """Summary info for a single consultation session in a list response."""
+
+    session_id: UUID = Field(..., description="Session ID")
+    channel_id: str = Field(..., description="WuKongIM channel ID")
+    channel_type: int = Field(default=251, description="WuKongIM channel type")
+    staff_id: Optional[UUID] = Field(None, description="Staff (doctor) ID")
+    staff_name: Optional[str] = Field(None, description="Staff display name")
+    staff_avatar: Optional[str] = Field(None, description="Staff avatar URL")
+    status: str = Field(..., description="Session status (open / closed)")
+    last_message_at: Optional[datetime] = Field(None, description="Last message timestamp")
+    message_count: int = Field(default=0, description="Total message count")
+    created_at: datetime = Field(..., description="Session creation timestamp")
+
+
+class ConsultationListResponse(BaseSchema):
+    """Response listing consultation sessions for a visitor."""
+
+    data: List[ConsultationSessionInfo] = Field(default_factory=list, description="Consultation sessions")

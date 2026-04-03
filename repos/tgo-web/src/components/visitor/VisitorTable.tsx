@@ -8,6 +8,7 @@ import { getPlatformLabel, toPlatformType } from '@/utils/platformUtils';
 import { formatLocalDateTime, formatOnlineDuration } from '@/utils/dateUtils';
 import Icon from '@/components/ui/Icon';
 import { normalizeTagHex, hexToRgba } from '@/utils/tagUtils';
+import { useChatStore } from '@/stores';
 
 interface VisitorTableProps {
   visitors: VisitorResponse[];
@@ -24,9 +25,13 @@ const VisitorTable: React.FC<VisitorTableProps> = ({ visitors, onVisitorClick })
 
   const handleGoToChat = (e: React.MouseEvent, visitorId: string) => {
     e.stopPropagation();
-    // Navigate to chat with customer service channel type (251)
-    // Channel ID format for visitors is visitor_id + "-vtr"
-    navigate(`/chat/251/${visitorId}-vtr`);
+    const chats = useChatStore.getState().chats;
+    const exist = chats.find(c =>
+      c.channelType === 251 &&
+      (c.channelId === `${visitorId}-vtr` || (c.channelInfo?.extra as any)?.id === visitorId)
+    );
+    const channelId = exist?.channelId ?? `${visitorId}-vtr`;
+    navigate(`/chat/251/${channelId}`);
   };
 
   return (

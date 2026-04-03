@@ -336,11 +336,14 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ open, onClose }) => {
         onClose();
         return;
       }
-      const channelId = `${visitorId}-vtr`;
-      const channelType = 251; // 访客会话类型
+      const channelType = 251;
 
-      // 1) 已存在则直接切换
-      const exist = chatsStore.chats.find(c => c.channelId === channelId && c.channelType === channelType);
+      // 1) 已存在则直接切换（支持 -vtr 和 cs- 两种频道格式）
+      const exist = chatsStore.chats.find(c =>
+        c.channelType === channelType &&
+        (c.channelId === `${visitorId}-vtr` || (c.channelInfo?.extra as any)?.id === visitorId)
+      );
+      const channelId = exist?.channelId ?? `${visitorId}-vtr`;
       if (exist) {
         chatsStore.setActiveChat(exist);
         onClose();

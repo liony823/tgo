@@ -15,6 +15,7 @@ import { WuKongIMApiService } from '../services/wukongimApi';
 import { notificationService, type NotificationPreferences, DEFAULT_NOTIFICATION_PREFERENCES } from '../services/notificationService';
 import { Message } from '../types';
 import { isWebSocketAutoConnectDisabled } from '@/utils/config';
+import { router } from '@/router';
 
 /**
  * Ensure ```spec fence markers are on their own lines.
@@ -48,12 +49,13 @@ export const WebSocketManager: React.FC = () => {
   const setConnectionStatus = useUIStore(state => state.setConnectionStatus);
 
   /**
-   * Handle notification click - navigate to the conversation
-   * Using window.location because WebSocketManager may be rendered outside Router context
+   * Handle notification click - navigate to the conversation using
+   * React Router so the SPA state (chats, WebSocket, etc.) is preserved.
    */
   const handleNotificationClick = React.useCallback((channelId: string, channelType: number) => {
     console.log('🔔 WebSocket Manager: Notification clicked, navigating to:', { channelId, channelType });
-    window.location.href = `/chat/${channelType}/${channelId}`;
+    window.focus();
+    router.navigate(`/chat/${channelType}/${channelId}`);
   }, []);
 
   /**

@@ -8,6 +8,7 @@ from fastapi.routing import APIRouter
 from pydantic import ValidationError
 from fastapi.openapi.utils import get_openapi
 
+from app.api.internal.router import internal_router
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.dev_data import log_startup_banner, ensure_permissions_seed
@@ -93,6 +94,9 @@ def create_app(
     application.add_exception_handler(RequestValidationError, validation_exception_handler)
     application.add_exception_handler(ValidationError, validation_exception_handler)
     application.add_exception_handler(Exception, general_exception_handler)
+
+    # Include internal API router (no authentication, for inter-service communication)
+    application.include_router(internal_router, prefix="/internal")
 
     # Include core API router
     application.include_router(api_router, prefix=settings.API_V1_STR)

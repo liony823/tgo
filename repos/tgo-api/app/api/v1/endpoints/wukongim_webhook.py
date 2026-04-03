@@ -18,7 +18,7 @@ from app.services.ai_client import AIServiceClient
 from app.services.wukongim_client import WuKongIMClient
 from app.services.visitor_notifications import notify_visitor_profile_updated
 from app.utils.const import MEMBER_TYPE_VISITOR, CHANNEL_TYPE_CUSTOMER_SERVICE
-from app.utils.encoding import parse_visitor_channel_id
+from app.services.visitor_service import resolve_visitor_id_from_channel
 
 logger = logging.getLogger("webhooks.wukongim")
 
@@ -185,9 +185,8 @@ async def _handle_msg_notify_batch(messages: Any, db: Session) -> None:
         if channel_type != CHANNEL_TYPE_CUSTOMER_SERVICE or not channel_id:
             continue
         
-        try:
-            visitor_id = parse_visitor_channel_id(channel_id)
-        except Exception:
+        visitor_id = resolve_visitor_id_from_channel(db, channel_id)
+        if not visitor_id:
             logger.warning(
                 "WuKongIM msg.notify contains invalid visitor channel ID",
                 extra={"channel_id": channel_id}

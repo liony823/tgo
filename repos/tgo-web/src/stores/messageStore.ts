@@ -77,6 +77,7 @@ interface MessageState {
   loadNewerHistory: (channelId: string, channelType: number) => Promise<void>;
   loadMessageContext: (channelId: string, channelType: number, targetSeq: number, totalLimit?: number) => Promise<void>;
   clearHistoricalMessages: (channelId: string, channelType: number) => void;
+  seedHistoricalMessage: (channelKey: string, msg: WuKongIMMessage) => void;
   setLoadingHistory: (loading: boolean) => void;
   setHistoryError: (error: string | null) => void;
   getChannelMessages: (channelId: string, channelType: number) => WuKongIMMessage[];
@@ -386,6 +387,26 @@ export const useMessageStore = create<MessageState>()(
           }),
           false,
           'clearHistoricalMessages'
+        );
+      },
+
+      seedHistoricalMessage: (channelKey: string, msg: WuKongIMMessage) => {
+        set(
+          (state) => {
+            const prev = state.historicalMessages[channelKey] || [];
+            const dup = prev.some(
+              (m) => m.message_id_str === msg.message_id_str || m.client_msg_no === msg.client_msg_no,
+            );
+            if (dup) return {};
+            return {
+              historicalMessages: {
+                ...state.historicalMessages,
+                [channelKey]: [...prev, msg],
+              },
+            };
+          },
+          false,
+          'seedHistoricalMessage',
         );
       },
 

@@ -40,7 +40,8 @@ from app.schemas.wukongim import (
 from app.schemas.visitor import VisitorResponse, resolve_visitor_display_name, set_visitor_display_nickname
 from app.api.v1.endpoints.channels import _build_enriched_visitor_payload
 from app.services.wukongim_client import wukongim_client
-from app.utils.encoding import build_visitor_channel_id, parse_visitor_channel_id
+from app.utils.encoding import build_visitor_channel_id
+from app.services.visitor_service import resolve_visitor_id_from_channel
 from app.utils.const import CHANNEL_TYPE_CUSTOMER_SERVICE
 
 logger = get_logger("api.conversations")
@@ -78,13 +79,10 @@ async def _build_channels_for_conversations(
         channel_type = conv.channel_type
         channel_id = conv.channel_id
         if channel_type == CHANNEL_TYPE_CUSTOMER_SERVICE and channel_id:
-            try:
-                visitor_id = parse_visitor_channel_id(channel_id)
+            visitor_id = resolve_visitor_id_from_channel(db, channel_id)
+            if visitor_id:
                 visitor_ids.append(visitor_id)
                 channel_id_to_visitor_id[channel_id] = visitor_id
-            except ValueError:
-                # Invalid channel ID format, skip
-                continue
     
     if not visitor_ids:
         return []
@@ -117,23 +115,6 @@ async def _build_channels_for_conversations(
     # Create visitor lookup map
     visitor_map: Dict[UUID, Visitor] = {v.id: v for v in visitors}
     
-    # Batch query open sessions for all visitors to get assigned_staff_id
-    open_sessions = (
-        db.query(VisitorSession)
-        .filter(
-            VisitorSession.visitor_id.in_(visitor_ids),
-            VisitorSession.project_id == project_id,
-            VisitorSession.status == SessionStatus.OPEN.value,
-        )
-        .all()
-    )
-    
-    # Create session lookup map (visitor_id -> staff_id)
-    visitor_to_staff: Dict[UUID, UUID] = {}
-    for session in open_sessions:
-        if session.staff_id:
-            visitor_to_staff[session.visitor_id] = session.staff_id
-    
     # Build channel info list
     channels: List[ChannelInfo] = []
     
@@ -159,16 +140,13 @@ async def _build_channels_for_conversations(
             project_id=project_id,
             accept_language=accept_language,
             user_language=user_language,
+            channel_id=channel_id,
         )
         
         # Set display_nickname based on user language
         set_visitor_display_nickname(visitor_payload, user_language)
         
-        # Add assigned_staff_id if exists
-        assigned_staff_id = visitor_to_staff.get(visitor_id)
         extra_data = visitor_payload.model_dump()
-        if assigned_staff_id:
-            extra_data["assigned_staff_id"] = str(assigned_staff_id)
         
         # Resolve display name
         name = resolve_visitor_display_name(
@@ -272,9 +250,8 @@ async def sync_my_conversations(
             for conv in conversations:
                 if conv.channel_type != CHANNEL_TYPE_CUSTOMER_SERVICE or not conv.channel_id:
                     continue
-                try:
-                    v_id = parse_visitor_channel_id(conv.channel_id)
-                except Exception:
+                v_id = resolve_visitor_id_from_channel(db, conv.channel_id)
+                if not v_id:
                     continue
                 visitor_id_by_channel_id[conv.channel_id] = v_id
                 visitor_ids_in_convs.append(v_id)

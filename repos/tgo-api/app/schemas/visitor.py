@@ -503,13 +503,25 @@ class VisitorRegisterRequest(BaseSchema):
         max_length=45,
         description="Visitor IP address (if not provided, will be extracted from request headers)",
     )
+    target_staff_id: Optional[UUID] = Field(
+        None,
+        description="Target staff ID for direct assignment (skip auto-assignment)",
+    )
+    skip_channel: bool = Field(
+        False,
+        description="If true, skip channel creation (for consultation / online-diagnosis flows where channels are created separately)",
+    )
 
 
 class VisitorRegisterResponse(VisitorResponse):
     """Response payload for visitor registration."""
-    channel_id: str
-    channel_type: int = 2
+    channel_id: Optional[str] = Field(None, description="WuKongIM channel ID (null when skip_channel=true)")
+    channel_type: Optional[int] = Field(None, description="WuKongIM channel type")
     im_token: str
+    assigned_staff_id: Optional[UUID] = Field(
+        None,
+        description="Assigned staff ID (set when target_staff_id was provided and assignment succeeded)",
+    )
 
 
 class VisitorMessageSyncRequest(BaseSchema):

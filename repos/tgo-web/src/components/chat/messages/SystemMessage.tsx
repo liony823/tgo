@@ -16,6 +16,10 @@ function parseSystemMessageContent(
   template: string,
   extra?: SystemMessageExtraItem[]
 ): React.ReactNode[] {
+
+  console.log("template", template);
+  console.log("extra", extra);
+
   if (!extra || extra.length === 0) {
     return [template];
   }

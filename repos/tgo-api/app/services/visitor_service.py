@@ -22,9 +22,36 @@ from app.utils.const import (
     CHANNEL_TYPE_CUSTOMER_SERVICE,
     MEMBER_TYPE_VISITOR,
 )
-from app.utils.encoding import build_visitor_channel_id
+from app.utils.encoding import build_visitor_channel_id, parse_visitor_channel_id, is_consultation_channel
 
 logger = get_logger("services.visitor")
+
+
+def resolve_visitor_id_from_channel(db: Session, channel_id: str) -> Optional[uuid.UUID]:
+    """Resolve visitor_id from any supported channel_id format.
+
+    Supports:
+    - Traditional format: {uuid}-vtr  → extracts visitor_id from the string
+    - Consultation format: cs-{uuid}  → looks up VisitorSession.channel_id in DB
+
+    Returns None if the channel_id cannot be resolved.
+    """
+    try:
+        return parse_visitor_channel_id(channel_id)
+    except ValueError:
+        pass
+
+    if is_consultation_channel(channel_id):
+        from app.models import VisitorSession
+        session = (
+            db.query(VisitorSession)
+            .filter(VisitorSession.channel_id == channel_id)
+            .first()
+        )
+        if session:
+            return session.visitor_id
+
+    return None
 
 # Predefined array of realistic visitor names for default visitor generation
 DEFAULT_VISITOR_NAMES = [
@@ -200,8 +227,9 @@ async def create_visitor_with_channel(
     timezone: Optional[str] = None,
     language: Optional[str] = None,
     ip_address: Optional[str] = None,
+    skip_channel: bool = False,
 ) -> Visitor:
-    """Create a new visitor with WuKongIM channel setup."""
+    """Create a new visitor, optionally with WuKongIM channel setup."""
     use_visitor_id_as_open_id = not platform_open_id
     
     if use_visitor_id_as_open_id:
@@ -250,7 +278,8 @@ async def create_visitor_with_channel(
     db.commit()
     db.refresh(visitor)
 
-    await ensure_visitor_channel(db, visitor, platform)
+    if not skip_channel:
+        await ensure_visitor_channel(db, visitor, platform)
     return visitor
 
 

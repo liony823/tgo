@@ -6,7 +6,7 @@ These endpoints are designed for inter-service communication within the internal
 
 from fastapi import APIRouter
 
-from app.api.internal.endpoints import ai_events, users, store
+from app.api.internal.endpoints import ai_events, staff, store, users
 
 internal_router = APIRouter()
 
@@ -22,6 +22,13 @@ internal_router.include_router(
     users.router,
     prefix="/users",
     tags=["Internal Users"]
+)
+
+# Staff endpoint
+internal_router.include_router(
+    staff.router,
+    prefix="/staff",
+    tags=["Internal Staff"]
 )
 
 # Store endpoint

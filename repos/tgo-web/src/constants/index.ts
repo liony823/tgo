@@ -9,12 +9,12 @@
 
 /**
  * Channel type constants from WuKongIM
- * 1 = person, 2 = group, 3 = customer service
+ * 1 = person, 2 = group, 251 = customer service / consultation
  */
 export const CHANNEL_TYPE = {
   PERSON: 1,
   GROUP: 2,
-  CUSTOMER_SERVICE: 3,
+  CUSTOMER_SERVICE: 251,
 } as const;
 
 /** Default channel type to use when backend value is missing */

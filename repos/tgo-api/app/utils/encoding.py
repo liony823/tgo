@@ -91,6 +91,12 @@ def decode_channel_id(encoded: str) -> str:
 
 VISITOR_CHANNEL_SUFFIX: Final[str] = "-vtr"
 PROJECT_STAFF_CHANNEL_SUFFIX: Final[str] = "-prj"
+CONSULTATION_CHANNEL_PREFIX: Final[str] = "cs-"
+
+
+def is_consultation_channel(channel_id: str) -> bool:
+    """Check if channel_id follows the consultation format (cs-{uuid})."""
+    return isinstance(channel_id, str) and channel_id.startswith(CONSULTATION_CHANNEL_PREFIX)
 
 
 def build_project_staff_channel_id(project_id: Union[str, UUID]) -> str:

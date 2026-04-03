@@ -237,8 +237,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
   // AI status logic:
   // 1. If ai_disabled is not set (null/undefined), use ai_mode (auto -> ON, others -> OFF)
   // 2. If ai_disabled is set, use its value (!ai_disabled -> ON)
+  // NOTE: Do NOT default aiMode to 'auto'. When channelInfo hasn't loaded yet
+  // (visitorExtra is undefined), defaulting to 'auto' would block the doctor's
+  // input with "AI enabled" before we even know the real platform setting.
   const aiDisabledRaw = visitorExtra?.ai_disabled;
-  const aiMode = visitorExtra?.ai_settings?.ai_mode ?? 'auto';
+  const aiMode = visitorExtra?.ai_settings?.ai_mode;
   const isAIEnabled = (aiDisabledRaw === null || aiDisabledRaw === undefined) 
     ? (aiMode === 'auto') 
     : !aiDisabledRaw;

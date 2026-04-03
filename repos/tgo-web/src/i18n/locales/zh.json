@@ -3097,9 +3097,9 @@
         "force": "AI 回复被强制终止"
       },
       "system": {
-        "staffAssigned": "您已接入人工客服，客服 {0} 将为您服务。",
-        "sessionTransferred": "会话已转接。客服 {0} 已将您转接给客服 {1}。",
-        "sessionClosed": "会话已结束。客服 {0} 已完成服务。",
+        "staffAssigned": "您已接入医生，医生 {0} 将为您服务。",
+        "sessionTransferred": "会话已转接。医生 {0} 已将您转接给医生 {1}。",
+        "sessionClosed": "会话已结束。医生 {0} 已完成服务。",
         "sessionClosedEmpty": "会话已结束。",
         "memoryCleared": "记忆已清除，AI 将重新开始对话"
       }

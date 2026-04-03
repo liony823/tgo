@@ -25,7 +25,7 @@ import { useOnboardingStore } from './onboardingStore';
 
 import { WuKongIMUtils } from '@/services/wukongimApi';
 import { getChannelKey, isSameChannel } from '@/utils/channelUtils';
-import { CHANNEL_TYPE, DEFAULT_CHANNEL_TYPE, MESSAGE_SENDER_TYPE, CHAT_STATUS as CHAT_STATUS_CONST, CHAT_PRIORITY as CHAT_PRIORITY_CONST, STORAGE_KEYS } from '@/constants';
+import { DEFAULT_CHANNEL_TYPE, MESSAGE_SENDER_TYPE, CHAT_STATUS as CHAT_STATUS_CONST, CHAT_PRIORITY as CHAT_PRIORITY_CONST, STORAGE_KEYS } from '@/constants';
 
 // Re-export StreamEndReason for backward compatibility
 export { StreamEndReason } from './messageStore';
@@ -458,9 +458,11 @@ export const useChatStore = create<ChatState>()(
           // Cross-Store Coordination
           // ====================================================================
           initializeStore: async () => {
-            // Initialize empty - conversations will be loaded from real APIs
-            useConversationStore.getState().setChats([]);
-            set({ chats: [] }, false, 'initializeStore');
+            // No-op: chats start empty from store initial state after a full
+            // page reload (persist does not include chats).  Do NOT clear
+            // existing chats here — they may already have been populated by
+            // WebSocket reconnection or other early initialization paths,
+            // and clearing them causes ChatPage URL-sync to fail.
           },
 
           /**
@@ -521,6 +523,24 @@ export const useChatStore = create<ChatState>()(
                   metadata: {},
                 };
                 convStore.setChats([newChat, ...convStore.chats]);
+
+                // Pre-seed the message into historicalMessages so it is
+                // immediately available when the doctor clicks on the
+                // conversation (avoids a blank list if the WuKongIM history
+                // API hasn't indexed the message yet).
+                const seedWkMsg: WuKongIMMessage = {
+                  header: { no_persist: 0, red_dot: 1, sync_once: 0 },
+                  setting: 0,
+                  message_id_str: message.messageId || message.id,
+                  client_msg_no: message.clientMsgNo || '',
+                  message_seq: message.messageSeq ?? 1,
+                  from_uid: message.fromUid || '',
+                  channel_id: channelId,
+                  channel_type: channelType,
+                  timestamp: sec,
+                  payload: { type: (message.payload as any)?.type ?? 1, content: message.content || '' },
+                };
+                msgStore.seedHistoricalMessage(key, seedWkMsg);
               }
 
               // Mark onboarding task as completed when receiving a visitor message
@@ -541,20 +561,20 @@ export const useChatStore = create<ChatState>()(
             }
 
             if (message.type === MESSAGE_SENDER_TYPE.VISITOR && channelId) {
-              const cachedChannel = channelStore.getChannel(channelId, CHANNEL_TYPE.PERSON);
+              const cachedChannel = channelStore.getChannel(channelId, channelType);
               const fallbackName = message.fromInfo?.name || cachedChannel?.name || `访客${String(channelId).slice(-4)}`;
               const fallbackAvatar = message.fromInfo?.avatar || message.avatar || cachedChannel?.avatar || '';
 
-              channelStore.seedChannel(channelId, DEFAULT_CHANNEL_TYPE, {
+              channelStore.seedChannel(channelId, channelType, {
                 name: fallbackName,
                 avatar: fallbackAvatar,
               });
 
               channelStore
-                .ensureChannel({ channel_id: channelId, channel_type: DEFAULT_CHANNEL_TYPE })
+                .ensureChannel({ channel_id: channelId, channel_type: channelType })
                 .then((info) => {
                   if (!info) return;
-                  get().applyChannelInfo(channelId, DEFAULT_CHANNEL_TYPE, info);
+                  get().applyChannelInfo(channelId, channelType, info);
                 })
                 .catch((error) => {
                   console.warn('频道信息获取失败（实时消息）:', error);
