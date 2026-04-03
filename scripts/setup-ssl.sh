@@ -10,23 +10,24 @@ CONFIG_FILE="$PROJECT_ROOT/data/.tgo-domain-config"
 CERTBOT_DIR="$PROJECT_ROOT/data/certbot"
 SSL_DIR="$PROJECT_ROOT/data/nginx/ssl"
 
-if [ $# -lt 3 ]; then
-    echo "Usage: $0 <web_domain> <widget_domain> <api_domain> [email] [ws_domain]"
+if [ $# -lt 4 ]; then
+    echo "Usage: $0 <web_domain> <widget_domain> <h5_domain> <api_domain> [email] [ws_domain]"
     exit 1
 fi
 
 WEB_DOMAIN=$1
 WIDGET_DOMAIN=$2
-API_DOMAIN=$3
-EMAIL=${4:-admin@example.com}
-WS_DOMAIN=${5:-}
+H5_DOMAIN=$3
+API_DOMAIN=$4
+EMAIL=${5:-admin@example.com}
+WS_DOMAIN=${6:-}
 
 # Create necessary directories
 mkdir -p "$CERTBOT_DIR/conf" "$CERTBOT_DIR/www/.well-known/acme-challenge" "$CERTBOT_DIR/logs"
 mkdir -p "$SSL_DIR"
 
 # Build domain list
-DOMAINS=("$WEB_DOMAIN" "$WIDGET_DOMAIN" "$API_DOMAIN")
+DOMAINS=("$WEB_DOMAIN" "$WIDGET_DOMAIN" "$H5_DOMAIN" "$API_DOMAIN")
 if [ -n "$WS_DOMAIN" ] && [ "$WS_DOMAIN" != "localhost" ]; then
     DOMAINS+=("$WS_DOMAIN")
 fi

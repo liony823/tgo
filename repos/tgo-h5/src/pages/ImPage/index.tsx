@@ -1,17 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import AdviceCard from './components/AdviceCard'
 import ChatFooter from './components/ChatFooter'
 import ChatHeader from './components/ChatHeader'
 import MessageList from './components/MessageList'
 import { useChatStore, usePlatformStore } from '@/store'
-import { resolveApiKey } from '@/utils/url'
 import type { ChatMessage as WidgetChatMessage } from '@/types/chat'
 import { Doctor } from '@/types/doctor'
-import { ApiResponse, type VisitorRegisterResponse } from '@/types/api'
-import { imListApi } from '@/services/imList'
-import { staffApi } from '@/services/staffApi';
+import { bizApi } from '@/services/biz';
 
 const DEFAULT_DOCTOR_AVATAR =
   'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=120&q=80'
@@ -110,7 +106,7 @@ const ImPage = () => {
   const consultationCreated = useRef(false)
 
   useEffect(() => {
-    void staffApi
+    void bizApi
       .getDoctorDetail(id)
       .then(data => {
         setDoctor(data.data);

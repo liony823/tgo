@@ -470,12 +470,13 @@ Commands:
   service <start|stop|remove> [--source] [--cn]
                                       Start/stop/remove core services
   tools <start|stop>                  Start/stop debug tools (adminer, redis-insight)
-  build <service>                     Rebuild specific service from source (api|rag|ai|plugin-runtime|device-control|workflow|platform|web|widget|all)
+  build <service>                     Rebuild specific service from source (api|rag|ai|plugin-runtime|device-control|workflow|platform|web|widget|h5|all)
   config <subcommand> [args]          Configure domains and SSL certificates
 
 Config Subcommands:
   web_domain <domain>                 Set web service domain (e.g., www.example.com)
   widget_domain <domain>              Set widget service domain (e.g., widget.example.com)
+  h5_domain <domain>                  Set H5 service domain (e.g., h5.example.com)
   api_domain <domain>                 Set API service domain (e.g., api.example.com)
   ws_domain <domain>                  Set WebSocket service domain (e.g., ws.example.com)
   http_port <port>                    Set Nginx HTTP port (default: 80)
@@ -504,6 +505,7 @@ Notes:
 Domain Configuration Examples:
   ./tgo.sh config web_domain www.example.com
   ./tgo.sh config widget_domain widget.example.com
+  ./tgo.sh config h5_domain h5.example.com
   ./tgo.sh config api_domain api.example.com
   ./tgo.sh config ws_domain ws.example.com
   ./tgo.sh config ssl_mode auto
@@ -760,9 +762,10 @@ has_domain_config() {
   fi
 
   # Check if any domain is configured (not empty and not localhost)
-  local web_domain widget_domain api_domain
+  local web_domain widget_domain h5_domain api_domain
   web_domain=$(grep -E "^WEB_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
   widget_domain=$(grep -E "^WIDGET_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
+  h5_domain=$(grep -E "^H5_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
   api_domain=$(grep -E "^API_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
 
   # Return success if any domain is configured
@@ -770,6 +773,9 @@ has_domain_config() {
     return 0
   fi
   if [ -n "$widget_domain" ] && [ "$widget_domain" != "localhost" ]; then
+    return 0
+  fi
+  if [ -n "$h5_domain" ] && [ "$h5_domain" != "localhost" ]; then
     return 0
   fi
   if [ -n "$api_domain" ] && [ "$api_domain" != "localhost" ]; then
@@ -854,9 +860,10 @@ configure_server_host() {
 
     # Show current configuration
     local domain_config_file="./data/.tgo-domain-config"
-    local web_domain widget_domain api_domain ssl_mode
+    local web_domain widget_domain h5_domain api_domain ssl_mode
     web_domain=$(grep -E "^WEB_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
     widget_domain=$(grep -E "^WIDGET_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
+    h5_domain=$(grep -E "^H5_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
     api_domain=$(grep -E "^API_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
     ssl_mode=$(grep -E "^SSL_MODE=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "none")
 
@@ -864,6 +871,7 @@ configure_server_host() {
     echo "  Current domains:"
     [ -n "$web_domain" ] && echo "    - Web:    $web_domain"
     [ -n "$widget_domain" ] && echo "    - Widget: $widget_domain"
+    [ -n "$h5_domain" ] && echo "    - H5:     $h5_domain"
     [ -n "$api_domain" ] && echo "    - API:    $api_domain"
     echo "    - SSL:    $ssl_mode"
     echo ""
@@ -1745,10 +1753,11 @@ cmd_build() {
     celery) services=(tgo-celery-flower) ;;
     web) services=(tgo-web) ;;
     widget) services=(tgo-widget-js) ;;
+    h5) services=(tgo-h5) ;;
     all) services=() ;;
     *)
       echo "[ERROR] Unknown service: $target" >&2
-      echo "Supported: api, rag, ai, plugin-runtime, device-control, workflow, platform, web, widget, all" >&2
+      echo "Supported: api, rag, ai, plugin-runtime, device-control, workflow, platform, web, widget, h5, all" >&2
       exit 1
       ;;
   esac
@@ -1852,6 +1861,7 @@ update_domain_env_vars() {
   local ssl_mode="none"
   local web_domain=""
   local widget_domain=""
+  local h5_domain=""
   local api_domain=""
   local ws_domain=""
 
@@ -1859,6 +1869,7 @@ update_domain_env_vars() {
     ssl_mode=$(grep -E "^SSL_MODE=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "none")
     web_domain=$(grep -E "^WEB_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
     widget_domain=$(grep -E "^WIDGET_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
+    h5_domain=$(grep -E "^H5_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
     api_domain=$(grep -E "^API_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
     ws_domain=$(grep -E "^WS_DOMAIN=" "$domain_config_file" 2>/dev/null | cut -d= -f2- || echo "")
   fi
@@ -1881,6 +1892,12 @@ update_domain_env_vars() {
     echo "[INFO] Updated VITE_WIDGET_PREVIEW_URL=${protocol}://${widget_domain}"
     echo "[INFO] Updated VITE_WIDGET_SCRIPT_BASE=${protocol}://${widget_domain}/tgo-widget-sdk.js"
     echo "[INFO] Updated VITE_WIDGET_DEMO_URL=${protocol}://${widget_domain}/demo.html"
+  fi
+
+  # Update H5 domain related env vars
+  if [ -n "$h5_domain" ] && [ "$h5_domain" != "localhost" ]; then
+    update_env_var "VITE_H5_BASE_URL" "${protocol}://${h5_domain}"
+    echo "[INFO] Updated VITE_H5_BASE_URL=${protocol}://${h5_domain}"
   fi
 
   # Update WuKongIM WebSocket domain related env vars
@@ -1932,6 +1949,19 @@ cmd_config() {
       sed -i.bak "s|^WIDGET_DOMAIN=.*|WIDGET_DOMAIN=$domain|" "$domain_config_file"
       rm -f "$domain_config_file.bak"
       echo "[INFO] Widget domain set to: $domain"
+      update_domain_env_vars
+      regenerate_nginx_config
+      ;;
+    h5_domain)
+      if [ $# -eq 0 ]; then
+        echo "[ERROR] Domain value required"
+        exit 1
+      fi
+      local domain="$1"
+      ensure_domain_config
+      sed -i.bak "s|^H5_DOMAIN=.*|H5_DOMAIN=$domain|" "$domain_config_file"
+      rm -f "$domain_config_file.bak"
+      echo "[INFO] H5 domain set to: $domain"
       update_domain_env_vars
       regenerate_nginx_config
       ;;
@@ -2034,7 +2064,7 @@ cmd_config() {
       # If domain not specified, use all configured domains
       if [ -z "$domain" ]; then
         source "$domain_config_file" 2>/dev/null || true
-        for d in "$WEB_DOMAIN" "$WIDGET_DOMAIN" "$API_DOMAIN"; do
+        for d in "$WEB_DOMAIN" "$WIDGET_DOMAIN" "$H5_DOMAIN" "$API_DOMAIN"; do
           [ -z "$d" ] && continue
           copy_manual_cert "$cert_file" "$key_file" "$d"
         done
@@ -2049,7 +2079,7 @@ cmd_config() {
       ensure_domain_config
       source "$domain_config_file" 2>/dev/null || true
 
-      if [ -z "$WEB_DOMAIN" ] || [ -z "$WIDGET_DOMAIN" ] || [ -z "$API_DOMAIN" ]; then
+      if [ -z "$WEB_DOMAIN" ] || [ -z "$WIDGET_DOMAIN" ] || [ -z "$H5_DOMAIN" ] || [ -z "$API_DOMAIN" ]; then
         echo "[ERROR] All domains must be configured first"
         echo "[INFO] Run: ./tgo.sh config web_domain <domain>"
         exit 1
@@ -2058,7 +2088,7 @@ cmd_config() {
       local email="${SSL_EMAIL:-admin@example.com}"
       local ws_domain="${WS_DOMAIN:-}"
       echo "[INFO] Setting up Let's Encrypt certificates..."
-      bash ./scripts/setup-ssl.sh "$WEB_DOMAIN" "$WIDGET_DOMAIN" "$API_DOMAIN" "$email" "$ws_domain"
+      bash ./scripts/setup-ssl.sh "$WEB_DOMAIN" "$WIDGET_DOMAIN" "$H5_DOMAIN" "$API_DOMAIN" "$email" "$ws_domain"
 
       sed -i.bak "s|^SSL_MODE=.*|SSL_MODE=auto|" "$domain_config_file"
       rm -f "$domain_config_file.bak"
@@ -2129,6 +2159,7 @@ cmd_config() {
       echo "Subcommands:"
       echo "  web_domain <domain>           Set web service domain"
       echo "  widget_domain <domain>        Set widget service domain"
+      echo "  h5_domain <domain>            Set H5 service domain"
       echo "  api_domain <domain>           Set API service domain"
       echo "  ws_domain <domain>            Set WebSocket service domain (WuKongIM)"
       echo "  http_port <port>              Set Nginx HTTP port"
@@ -2154,6 +2185,7 @@ ensure_domain_config() {
 
 WEB_DOMAIN=
 WIDGET_DOMAIN=
+H5_DOMAIN=
 API_DOMAIN=
 WS_DOMAIN=
 SSL_MODE=none
@@ -2227,6 +2259,7 @@ cmd_doctor() {
     "tgo-platform:Platform Service"
     "tgo-web:Web Frontend"
     "tgo-widget-js:Widget App"
+    "tgo-h5:H5 App"
     "tgo-nginx:Nginx"
   )
   

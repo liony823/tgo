@@ -6,8 +6,7 @@ import DoctorList from './components/DoctorList';
 import FooterCTA from './components/FooterCTA';
 import Header from './components/Header';
 import TabBar from './components/TabBar';
-import { staffApi } from '@/services/staffApi';
-import type { StaffResponseList } from '@/services/api';
+import { bizApi } from '@/services/biz';
 
 import type { Doctor } from '@/types/doctor';
 const categories = [];
@@ -35,7 +34,7 @@ const DoctorListPage = () => {
 
     const targetPage = reset ? 1 : page;
     try {
-      const result = await staffApi.getDoctorList({ page: targetPage, pageSize: PAGE_SIZE });
+      const result = await bizApi.getDoctorList({ page: targetPage, pageSize: PAGE_SIZE });
       setDoctorList(prev => (reset ? result.list : [...prev, ...result.list]));
       setPage(targetPage + 1);
       setFinished(!result.hasMore || result.list.length === 0);

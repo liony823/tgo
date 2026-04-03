@@ -65,6 +65,7 @@ run_test "DOMAIN_CONFIG_QUICK_REFERENCE.md exists" "[ -f '$PROJECT_ROOT/docs/DOM
 # Test 7: Check if .env.example has domain config
 run_test ".env.example has WEB_DOMAIN" "grep -q 'WEB_DOMAIN' '$PROJECT_ROOT/.env.example'"
 run_test ".env.example has WIDGET_DOMAIN" "grep -q 'WIDGET_DOMAIN' '$PROJECT_ROOT/.env.example'"
+run_test ".env.example has H5_DOMAIN" "grep -q 'H5_DOMAIN' '$PROJECT_ROOT/.env.example'"
 run_test ".env.example has API_DOMAIN" "grep -q 'API_DOMAIN' '$PROJECT_ROOT/.env.example'"
 run_test ".env.example has SSL_MODE" "grep -q 'SSL_MODE' '$PROJECT_ROOT/.env.example'"
 

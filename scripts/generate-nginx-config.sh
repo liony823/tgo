@@ -42,6 +42,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
     # Set defaults for localhost
     WEB_DOMAIN=""
     WIDGET_DOMAIN=""
+    H5_DOMAIN=""
     API_DOMAIN=""
     SSL_MODE="none"
 else
@@ -55,6 +56,7 @@ mkdir -p "$NGINX_CONF_DIR"
 SSL_ENABLED=${SSL_MODE:-none}
 WEB_DOMAIN=${WEB_DOMAIN:-localhost}
 WIDGET_DOMAIN=${WIDGET_DOMAIN:-localhost}
+H5_DOMAIN=${H5_DOMAIN:-localhost}
 API_DOMAIN=${API_DOMAIN:-localhost}
 WS_DOMAIN=${WS_DOMAIN:-localhost}
 
@@ -94,6 +96,7 @@ resolver 127.0.0.11 ipv6=off;
 # Decide which upstream (web vs widget) should serve frontend traffic based on Referer
 map $http_referer $assets_upstream {
     ~*/widget(/|$)  tgo-widget-js:80;
+    ~*/h5(/|$)      tgo-h5:80;
     default          tgo-web:80;
 }
 
@@ -177,8 +180,22 @@ else
         proxy_redirect off;
     }
 
-    # Static assets for web and widget apps
-    # Decide upstream (tgo-web vs tgo-widget-js) based on Referer
+    # H5 app (by /h5 path)
+    # Match /h5, /h5/, /h5/xxx (query strings are handled automatically by nginx)
+    location ~ ^/h5(/.*)?$ {
+        # Strip /h5 prefix, default to / if nothing after /h5
+        rewrite ^/h5(/.*)?$ $1 break;
+        rewrite ^$ / break;
+        proxy_pass http://tgo-h5:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+    }
+
+    # Static assets for web, widget and h5 apps
+    # Decide upstream (tgo-web vs tgo-widget-js vs tgo-h5) based on Referer
     location /assets/ {
         proxy_pass http://$assets_upstream;
         proxy_set_header Host $host;
@@ -272,6 +289,27 @@ server {
 
     location / {
         proxy_pass http://tgo-widget-js:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+    }
+}
+
+# HTTPS - H5 Service
+server {
+    listen 443 ssl http2;
+    server_name H5_DOMAIN;
+
+    ssl_certificate /etc/nginx/ssl/H5_DOMAIN/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl/H5_DOMAIN/key.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    location / {
+        proxy_pass http://tgo-h5:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -403,6 +441,20 @@ server {
         proxy_redirect off;
     }
 
+    # H5 app (by /h5 path)
+    # Match /h5, /h5/, /h5/xxx (query strings are handled automatically by nginx)
+    location ~ ^/h5(/.*)?$ {
+        # Strip /h5 prefix, default to / if nothing after /h5
+        rewrite ^/h5(/.*)?$ $1 break;
+        rewrite ^$ / break;
+        proxy_pass http://tgo-h5:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+    }
+
     # Web service (default, root path)
     location / {
         proxy_pass http://tgo-web:80;
@@ -420,6 +472,7 @@ fi
 TEMP_CONF=$(mktemp)
 cat "$NGINX_CONF_DIR/default.conf" | sed "s/WEB_DOMAIN/$WEB_DOMAIN/g" | \
   sed "s/WIDGET_DOMAIN/$WIDGET_DOMAIN/g" | \
+  sed "s/H5_DOMAIN/$H5_DOMAIN/g" | \
   sed "s/API_DOMAIN/$API_DOMAIN/g" | \
   sed "s/WS_DOMAIN/$WS_DOMAIN/g" | \
   sed "s/CLIENT_MAX_BODY_SIZE/$NGINX_CLIENT_MAX_BODY_SIZE/g" | \
@@ -432,6 +485,7 @@ echo "[INFO] Nginx configuration generated: $NGINX_CONF_DIR/default.conf"
 echo "[INFO] Domains configured:"
 echo "  - Web: $WEB_DOMAIN"
 echo "  - Widget: $WIDGET_DOMAIN"
+echo "  - H5: $H5_DOMAIN"
 echo "  - API: $API_DOMAIN"
 echo "  - WebSocket: $WS_DOMAIN"
 echo "[INFO] SSL Mode: $SSL_ENABLED"

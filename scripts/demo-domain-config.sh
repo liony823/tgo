@@ -29,6 +29,7 @@ echo -e "${YELLOW}[2/5] Configuring domains...${NC}"
 cd "$PROJECT_ROOT"
 ./tgo.sh config web_domain www.example.com
 ./tgo.sh config widget_domain widget.example.com
+./tgo.sh config h5_domain h5.example.com
 ./tgo.sh config api_domain api.example.com
 echo -e "${GREEN}✓ Domains configured${NC}"
 echo ""
@@ -58,6 +59,7 @@ echo -e "${BLUE}Next steps:${NC}"
 echo "1. Configure DNS records:"
 echo "   www.example.com      A    <your-server-ip>"
 echo "   widget.example.com   A    <your-server-ip>"
+echo "   h5.example.com       A    <your-server-ip>"
 echo "   api.example.com      A    <your-server-ip>"
 echo ""
 echo "2. Start services:"

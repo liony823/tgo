@@ -19,6 +19,7 @@ TGO 是一个 AI 驱动的全渠道客服平台，采用微服务架构，包含
 | [tgo-widget-miniprogram](#tgo-widget-miniprogram) | 微信小程序聊天组件 | 微信小程序 / JS | npm 包 |
 | [tgo-cli](#tgo-cli) | 命令行工具 + MCP Server (客服端) | Node.js / TypeScript | CLI / stdio |
 | [tgo-widget-cli](#tgo-widget-cli) | 命令行工具 + MCP Server (访客端) | Node.js / TypeScript | CLI / stdio |
+| [tgo-h5](#tgo-h5) | 患者端前端 | React 19 / TypeScript / Vite | 5173 |
 
 ## 各项目详情
 
@@ -131,6 +132,16 @@ AI Agent 客服操作命令行工具，同时提供 MCP Server 模式供 Claude 
 - **认证**: Platform API Key + 访客注册 (非 JWT)
 - **职责**: 访客注册、消息发送 (SSE 流式 AI 回复)、消息历史、文件上传、活动记录、WuKongIM 实时消息
 - **命令参考**: 详见 [`tgo-widget-cli/COMMANDS.md`](./tgo-widget-cli/COMMANDS.md)
+
+
+### tgo-h5
+
+患者端前端，提供患者端聊天、医生列表、医生详情等功能。
+
+- **技术栈**: React 19, TypeScript, Vite, Zustand, Tailwind CSS, WuKongIM SDK, i18next
+- **端口**: 5173 (开发), 80 (生产)
+- **职责**: 患者端聊天、医生列表、医生详情等功能
+
 
 ## 基础设施依赖
 

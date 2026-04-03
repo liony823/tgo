@@ -51,7 +51,7 @@ docker run --rm \
 }
 
 # Copy renewed certificates to nginx ssl directory
-for domain in "$WEB_DOMAIN" "$WIDGET_DOMAIN" "$API_DOMAIN"; do
+for domain in "$WEB_DOMAIN" "$WIDGET_DOMAIN" "$H5_DOMAIN" "$API_DOMAIN"; do
     if [ -f "$CERTBOT_DIR/conf/live/$domain/fullchain.pem" ]; then
         mkdir -p "$SSL_DIR/$domain"
         cp "$CERTBOT_DIR/conf/live/$domain/fullchain.pem" "$SSL_DIR/$domain/cert.pem"

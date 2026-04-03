@@ -4,7 +4,7 @@ import BottomActionBar from './components/BottomActionBar';
 import DoctorInfoCard from './components/DoctorInfoCard';
 import HeaderOverlay from './components/HeaderOverlay';
 import SkillGrid from './components/SkillGrid';
-import { staffApi } from '@/services/staffApi';
+import { bizApi } from '@/services/biz';
 import type { Doctor } from '@/types/doctor';
 
 const FALLBACK_AVATAR =
@@ -18,7 +18,7 @@ const DoctorInfoPage = () => {
 
   useEffect(() => {
     let cancelled = false;
-    void staffApi
+    void bizApi
       .getDoctorDetail(id)
       .then(data => {
         if (!cancelled) {
